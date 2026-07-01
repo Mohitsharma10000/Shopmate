@@ -10,7 +10,9 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { account, authEvents } from "@/integrations/appwrite/client";
 import {
   LayoutDashboard,
   Package,
@@ -20,7 +22,9 @@ import {
   Store,
   Truck,
   Users,
+  LogOut,
 } from "lucide-react";
+import { toast } from "sonner";
 
 const nav = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -35,7 +39,26 @@ const settings = [{ title: "Settings", url: "/settings/shop", icon: Settings }];
 
 export function AppSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  
   const isActive = (url: string) => path === url || path.startsWith(url + "/");
+
+  async function handleSignOut() {
+    try {
+      await qc.cancelQueries();
+      qc.clear();
+      await account.deleteSession("current");
+      authEvents.notify();
+      toast.success("Signed out successfully");
+      navigate({ to: "/auth", replace: true });
+    } catch (err: any) {
+      console.error("Sign out failed:", err);
+      // Even if session delete fails (e.g. offline), clean local state & redirect
+      authEvents.notify();
+      navigate({ to: "/auth", replace: true });
+    }
+  }
 
   return (
     <Sidebar collapsible="icon">
@@ -82,6 +105,16 @@ export function AppSidebar() {
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))}
+          <SidebarMenuItem>
+            <SidebarMenuButton 
+              onClick={handleSignOut} 
+              tooltip="Sign out"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10 focus:text-destructive focus:bg-destructive/10"
+            >
+              <LogOut className="h-4 w-4" />
+              <span>Sign out</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
