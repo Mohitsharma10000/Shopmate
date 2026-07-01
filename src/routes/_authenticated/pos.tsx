@@ -754,7 +754,7 @@ async function generateReceiptPDF(sale: any, shopName: string) {
   const pw = w - margin * 2; // printable width
   let y = 8;
 
-  const fmtAmt = (n: number) => `₹${n.toFixed(2)}`;
+  const fmtAmt = (n: number) => `Rs. ${n.toFixed(2)}`;
 
   // Shop name
   doc.setFontSize(12);
@@ -1006,10 +1006,7 @@ function ReceiptDialog({
       await generateReceiptPDF(sale, activeShopName);
     } catch (err: any) {
       console.error(err);
-      // Fallback message if error wasn't already toasted by the child
-      if (err?.message !== "Popup blocked. Please allow popups to view receipt.") {
-        toast.error("Failed to generate or save PDF");
-      }
+      toast.error(`Failed to generate or save PDF: ${err?.message || err}`);
     } finally {
       setDownloading(false);
     }
