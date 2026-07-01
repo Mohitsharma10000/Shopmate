@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
   Search,
@@ -17,6 +17,9 @@ import {
   Send,
   Loader2,
 } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
+import { Filesystem, Directory } from "@capacitor/filesystem";
+import { Share } from "@capacitor/share";
 import { Route as AuthRoute } from "./route";
 import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
@@ -59,7 +62,7 @@ import {
 } from "@/lib/sales.functions";
 import { listCustomers, upsertCustomer } from "@/lib/customers.functions";
 import { User, UserPlus } from "lucide-react";
-import { useEffect } from "react";
+
 
 export const Route = createFileRoute("/_authenticated/pos")({
   head: () => ({ meta: [{ title: "Point of Sale — ShopOS" }] }),
@@ -867,27 +870,71 @@ async function generateReceiptPDF(sale: any, shopName: string) {
 
   // Generate PDF as Blob
   const blob = doc.output("blob");
-  const blobUrl = URL.createObjectURL(blob);
 
-  // Attempt direct download via anchor
-  try {
-    const link = document.createElement("a");
-    link.href = blobUrl;
-    link.download = `Invoice_${sale.invoice_number}.pdf`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  } catch (err) {
-    console.error("Direct download failed", err);
-  }
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const base64Data = await blobToBase64(blob);
+      const fileName = `Invoice_${sale.invoice_number}.pdf`;
+      const result = await Filesystem.writeFile({
+        path: fileName,
+        data: base64Data,
+        directory: Directory.Cache,
+      });
 
-  // Mobile fallback: Open in a new tab so users can view, print, or share/save
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-    navigator.userAgent
-  );
-  if (isMobile) {
-    window.open(blobUrl, "_blank");
+      await Share.share({
+        title: `Invoice ${sale.invoice_number}`,
+        text: `Invoice PDF for sale ${sale.invoice_number}`,
+        url: result.uri,
+        dialogTitle: "Save/Share Invoice PDF",
+      });
+
+      toast.success("PDF saved and ready to share/save");
+    } catch (err: any) {
+      console.error("Capacitor PDF generation/share failed", err);
+      toast.error(`Failed to save PDF: ${err?.message || err}`);
+      throw err;
+    }
+  } else {
+    const blobUrl = URL.createObjectURL(blob);
+    const userAgent = navigator.userAgent || "";
+    const isIOS = /iPad|iPhone|iPod/.test(userAgent) && !(window as any).MSStream;
+    const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent);
+    const isIOSSafari = isIOS && isSafari;
+
+    if (isIOSSafari) {
+      const newWin = window.open(blobUrl, "_blank");
+      if (!newWin) {
+        throw new Error("Popup blocked. Please allow popups to view receipt.");
+      }
+      toast.info("PDF opened in new tab. Use your browser's share icon to save it.");
+    } else {
+      try {
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = `Invoice_${sale.invoice_number}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success("PDF download triggered successfully.");
+      } catch (err) {
+        console.error("Direct download failed", err);
+        throw new Error("Failed to trigger download in browser");
+      }
+    }
   }
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(",")[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 function ReceiptDialog({
@@ -957,10 +1004,12 @@ function ReceiptDialog({
     setDownloading(true);
     try {
       await generateReceiptPDF(sale, activeShopName);
-      toast.success("PDF downloaded successfully");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error("Failed to generate PDF");
+      // Fallback message if error wasn't already toasted by the child
+      if (err?.message !== "Popup blocked. Please allow popups to view receipt.") {
+        toast.error("Failed to generate or save PDF");
+      }
     } finally {
       setDownloading(false);
     }
