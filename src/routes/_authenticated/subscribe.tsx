@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState, useEffect, useCallback } from "react";
 import { Route as AuthRoute } from "./route";
+import { client, APPWRITE_DATABASE_ID } from "@/integrations/appwrite/client";
 import { Button } from "@/components/ui/button";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -75,21 +76,46 @@ function SubscribePage() {
   const [paying, setPaying] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  // Check if already subscribed, polling every 2 seconds to detect owner activation or payment status updates
+  // Check if already subscribed, polling every 10 seconds as a backup method
   const subStatus = useQuery({
     queryKey: ["subscription-status"],
     queryFn: () => statusFn(),
     refetchInterval: (query) => {
-      // Poll every 2 seconds if not active yet
-      return query.state.data?.status === "active" ? false : 2000;
+      // Poll every 10 seconds if not active yet
+      return query.state.data?.status === "active" ? false : 10000;
     },
   });
+
+  // Appwrite Realtime websocket subscription for instant, push-based updates
+  useEffect(() => {
+    if (!user?.$id) return;
+
+    const channel = `databases.${APPWRITE_DATABASE_ID}.collections.profiles.documents.${user.$id}`;
+    console.log(`[Realtime Sub] Subscribing to profiles updates channel: ${channel}`);
+
+    const unsubscribe = client.subscribe(channel, (response) => {
+      const updatedProfile = response.payload as any;
+      console.log("[Realtime Sub] Received profile status change:", updatedProfile);
+      
+      if (updatedProfile?.subscription_status === "active") {
+        qc.setQueryData(["subscription-status"], {
+          status: "active",
+          payment_id: updatedProfile.razorpay_payment_id || "paid",
+        });
+      }
+    });
+
+    return () => {
+      console.log(`[Realtime Sub] Cleaning up websocket channel: ${channel}`);
+      unsubscribe();
+    };
+  }, [user?.$id, qc]);
 
   useEffect(() => {
     if (subStatus.data?.status === "active") {
       navigate({ to: "/dashboard", replace: true });
     }
-  }, [subStatus.data, navigate]);
+  }, [subStatus.data?.status, navigate]);
 
   const verifyMut = useMutation({
     mutationFn: (paymentId: string) =>

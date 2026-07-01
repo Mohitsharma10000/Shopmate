@@ -26,17 +26,28 @@ export const Route = createFileRoute("/auth")({
         throw redirect({ to: "/admin" });
       }
       
-      // Check subscription status — redirect to subscribe or dashboard using server function
-      try {
-        const res = await getSubscriptionStatus();
-        if (res.status === "active") {
-          throw redirect({ to: "/dashboard" });
-        } else {
-          throw redirect({ to: "/subscribe" });
+      // Check subscription status with retry logic for transient server/network errors
+      let res;
+      let attempts = 0;
+      while (attempts < 2) {
+        try {
+          res = await getSubscriptionStatus();
+          break;
+        } catch (err: any) {
+          if (err?.to || err?.redirect) throw err;
+          attempts++;
+          if (attempts >= 2) {
+            console.error("[Auth Route] Failed to check subscription status after 2 attempts:", err);
+            // On persistent error, let them stay on auth page rather than force-paywalling
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
-      } catch (err: any) {
-        if (err?.to || err?.redirect) throw err;
-        // Profile not found or error — send to subscribe
+      }
+
+      if (res && res.status === "active") {
+        throw redirect({ to: "/dashboard" });
+      } else {
         throw redirect({ to: "/subscribe" });
       }
     } catch (err: any) {
