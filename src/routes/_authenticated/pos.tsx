@@ -871,7 +871,11 @@ async function generateReceiptPDF(sale: any, shopName: string) {
   // Generate PDF as Blob
   const blob = doc.output("blob");
 
-  if (Capacitor.isNativePlatform()) {
+  const useNativeSave = Capacitor.isNativePlatform() && 
+                        Capacitor.isPluginAvailable("Filesystem") && 
+                        Capacitor.isPluginAvailable("Share");
+
+  if (useNativeSave) {
     try {
       const base64Data = await blobToBase64(blob);
       const fileName = `Invoice_${sale.invoice_number}.pdf`;
