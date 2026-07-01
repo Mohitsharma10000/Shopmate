@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate, redirect } from "@tanstack/react-router";
 import { useState, useEffect, type FormEvent } from "react";
 import { account, authEvents, databases, APPWRITE_DATABASE_ID } from "@/integrations/appwrite/client";
 import { ID, OAuthProvider } from "appwrite";
+import { getSubscriptionStatus } from "@/lib/subscription.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,14 +25,11 @@ export const Route = createFileRoute("/auth")({
       if (user.email.toLowerCase() === "mohitsharma14651@gmail.com") {
         throw redirect({ to: "/admin" });
       }
-      // Check subscription status — redirect to subscribe or dashboard
+      
+      // Check subscription status — redirect to subscribe or dashboard using server function
       try {
-        const profile = await databases.getDocument(
-          APPWRITE_DATABASE_ID,
-          "profiles",
-          user.$id
-        );
-        if (profile.subscription_status === "active") {
+        const res = await getSubscriptionStatus();
+        if (res.status === "active") {
           throw redirect({ to: "/dashboard" });
         } else {
           throw redirect({ to: "/subscribe" });

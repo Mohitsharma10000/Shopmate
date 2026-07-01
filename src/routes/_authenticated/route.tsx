@@ -1,5 +1,6 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { account, databases, APPWRITE_DATABASE_ID } from "@/integrations/appwrite/client";
+import { account } from "@/integrations/appwrite/client";
+import { getSubscriptionStatus } from "@/lib/subscription.functions";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -11,8 +12,6 @@ export const Route = createFileRoute("/_authenticated")({
       throw redirect({ to: "/auth" });
     }
 
-
-
     // Skip subscription check if we're already heading to /subscribe or if it is the owner
     if (user.email.toLowerCase() === "mohitsharma14651@gmail.com") {
       return { user };
@@ -22,14 +21,10 @@ export const Route = createFileRoute("/_authenticated")({
       return { user };
     }
 
-    // Check subscription status from profile
+    // Check subscription status from profile using server function to bypass client permission issues
     try {
-      const profile = await databases.getDocument(
-        APPWRITE_DATABASE_ID,
-        "profiles",
-        user.$id
-      );
-      if (profile.subscription_status !== "active") {
+      const res = await getSubscriptionStatus();
+      if (res.status !== "active") {
         throw redirect({ to: "/subscribe" });
       }
     } catch (err: any) {
