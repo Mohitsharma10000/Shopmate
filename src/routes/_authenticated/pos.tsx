@@ -743,18 +743,130 @@ function CustomerPicker({
 }
 
 
-function loadHtml2Pdf(): Promise<any> {
-  return new Promise((resolve) => {
-    if ((window as any).html2pdf) {
-      resolve((window as any).html2pdf);
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-    script.onload = () => resolve((window as any).html2pdf);
-    script.onerror = () => resolve(null);
-    document.body.appendChild(script);
+async function generateReceiptPDF(sale: any, shopName: string) {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "mm", format: [80, 200] }); // 80mm thermal receipt width
+  const w = 80;
+  const margin = 5;
+  const pw = w - margin * 2; // printable width
+  let y = 8;
+
+  const fmtAmt = (n: number) => `₹${n.toFixed(2)}`;
+
+  // Shop name
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text(shopName.toUpperCase(), w / 2, y, { align: "center" });
+  y += 5;
+
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "normal");
+  doc.text("Retail Invoice", w / 2, y, { align: "center" });
+  y += 4;
+
+  // Dashed separator
+  doc.setLineDashPattern([1, 1], 0);
+  doc.setLineWidth(0.2);
+  doc.line(margin, y, w - margin, y);
+  y += 4;
+
+  // Invoice number & date
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.text(`INVOICE ${sale.invoice_number}`, w / 2, y, { align: "center" });
+  y += 4;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  const dateStr = new Date(sale.invoice_date || Date.now()).toLocaleString("en-IN", {
+    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
+  doc.text(dateStr, w / 2, y, { align: "center" });
+  y += 3;
+
+  if (sale.customer_name) {
+    y += 1;
+    doc.setFontSize(7);
+    doc.text(`Customer: ${sale.customer_name}`, margin, y);
+    y += 3;
+  }
+
+  // Separator
+  y += 1;
+  doc.line(margin, y, w - margin, y);
+  y += 4;
+
+  // Items header
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "bold");
+  doc.text("Item", margin, y);
+  doc.text("Amt", w - margin, y, { align: "right" });
+  y += 3;
+  doc.setFont("helvetica", "normal");
+
+  // Items
+  (sale.items || []).forEach((it: any) => {
+    const name = it.name || it.product?.name || "Product";
+    const qty = it.quantity;
+    const price = Number(it.unit_price);
+    const lineTotal = qty * price;
+
+    // Item name (truncate if too long)
+    const displayName = name.length > 28 ? name.substring(0, 26) + "…" : name;
+    doc.text(displayName, margin, y);
+    doc.text(fmtAmt(lineTotal), w - margin, y, { align: "right" });
+    y += 3;
+
+    // Qty x Price detail
+    doc.setFontSize(6);
+    doc.text(`  ${qty} × ${fmtAmt(price)}`, margin, y);
+    y += 3.5;
+    doc.setFontSize(7);
+
+    // Add page if needed
+    if (y > 185) {
+      doc.addPage([80, 200]);
+      y = 8;
+    }
+  });
+
+  // Separator
+  doc.line(margin, y, w - margin, y);
+  y += 4;
+
+  // Totals
+  const addRow = (label: string, value: string, bold = false) => {
+    if (bold) doc.setFont("helvetica", "bold");
+    doc.text(label, margin, y);
+    doc.text(value, w - margin, y, { align: "right" });
+    if (bold) doc.setFont("helvetica", "normal");
+    y += 3.5;
+  };
+
+  doc.setFontSize(7);
+  addRow("Subtotal", fmtAmt(Number(sale.subtotal)));
+  addRow("Tax", fmtAmt(Number(sale.tax_total)));
+  if (Number(sale.discount) > 0) {
+    addRow("Discount", `-${fmtAmt(Number(sale.discount))}`);
+  }
+  y += 1;
+  doc.setFontSize(9);
+  addRow("TOTAL", fmtAmt(Number(sale.total)), true);
+  doc.setFontSize(7);
+  addRow(`Paid (${sale.payment_method})`, fmtAmt(Number(sale.amount_paid)));
+  if (Number(sale.change_due) > 0) {
+    addRow("Change", fmtAmt(Number(sale.change_due)));
+  }
+
+  // Footer separator
+  y += 2;
+  doc.line(margin, y, w - margin, y);
+  y += 4;
+
+  doc.setFontSize(7);
+  doc.text("Thank you!", w / 2, y, { align: "center" });
+
+  // Save
+  doc.save(`Invoice_${sale.invoice_number}.pdf`);
 }
 
 function ReceiptDialog({
@@ -822,29 +934,8 @@ function ReceiptDialog({
 
   const handleDownloadPDF = async () => {
     setDownloading(true);
-    const html2pdf = await loadHtml2Pdf();
-    if (!html2pdf) {
-      toast.error("Failed to load PDF library. Please check your internet connection.");
-      setDownloading(false);
-      return;
-    }
-
-    const element = printRef.current;
-    if (!element) {
-      setDownloading(false);
-      return;
-    }
-
-    const opt = {
-      margin:       [10, 10, 10, 10],
-      filename:     `Invoice_${sale.invoice_number}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
-
     try {
-      await html2pdf().from(element).set(opt).save();
+      await generateReceiptPDF(sale, activeShopName);
       toast.success("PDF downloaded successfully");
     } catch (err) {
       console.error(err);
@@ -897,7 +988,7 @@ ${itemsText}
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Sale complete</DialogTitle>
         </DialogHeader>
