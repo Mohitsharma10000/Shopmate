@@ -199,15 +199,17 @@ function ReportsPage() {
           <Kpi label="Tax collected" value={fmt(series.data?.totals.tax ?? 0)} />
         </div>
 
-        <Tabs defaultValue="sales">
-          <TabsList>
-            <TabsTrigger value="sales">Sales</TabsTrigger>
-            <TabsTrigger value="profit">Profit</TabsTrigger>
-            <TabsTrigger value="products">Top products</TabsTrigger>
-            <TabsTrigger value="payments">Payments</TabsTrigger>
-            <TabsTrigger value="stock">Stock alerts</TabsTrigger>
-            <TabsTrigger value="slow">Slow movers</TabsTrigger>
-          </TabsList>
+        <Tabs defaultValue="sales" className="w-full">
+          <div className="overflow-x-auto w-full scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0 mb-4">
+            <TabsList className="inline-flex w-max sm:w-full bg-muted/60 p-1 rounded-lg">
+              <TabsTrigger value="sales" className="text-xs sm:text-sm">Sales</TabsTrigger>
+              <TabsTrigger value="profit" className="text-xs sm:text-sm">Profit</TabsTrigger>
+              <TabsTrigger value="products" className="text-xs sm:text-sm">Top products</TabsTrigger>
+              <TabsTrigger value="payments" className="text-xs sm:text-sm">Payments</TabsTrigger>
+              <TabsTrigger value="stock" className="text-xs sm:text-sm">Stock alerts</TabsTrigger>
+              <TabsTrigger value="slow" className="text-xs sm:text-sm">Slow movers</TabsTrigger>
+            </TabsList>
+          </div>
 
           <TabsContent value="profit" className="mt-4 space-y-4">
             <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
@@ -292,44 +294,46 @@ function ReportsPage() {
                   <Download className="h-4 w-4" /> CSV
                 </Button>
               </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead className="text-right">Revenue</TableHead>
-                      <TableHead className="text-right">Cost</TableHead>
-                      <TableHead className="text-right">Profit</TableHead>
-                      <TableHead className="text-right">Margin</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(topProfit.data ?? []).map((p: any) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="font-medium">{p.name}</TableCell>
-                        <TableCell className="text-right">{p.qty}</TableCell>
-                        <TableCell className="text-right">{fmt(p.revenue)}</TableCell>
-                        <TableCell className="text-right">{fmt(p.cost)}</TableCell>
-                        <TableCell className="text-right text-emerald-600 font-medium">
-                          {fmt(p.profit)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {p.revenue > 0
-                            ? `${((p.profit / p.revenue) * 100).toFixed(1)}%`
-                            : "—"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {(topProfit.data ?? []).length === 0 && (
+              <CardContent className="p-0 sm:p-6">
+                <div className="overflow-x-auto w-full">
+                  <Table>
+                    <TableHeader>
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
-                          No data
-                        </TableCell>
+                        <TableHead className="min-w-[150px]">Product</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead className="text-right">Revenue</TableHead>
+                        <TableHead className="text-right">Cost</TableHead>
+                        <TableHead className="text-right">Profit</TableHead>
+                        <TableHead className="text-right">Margin</TableHead>
                       </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {(topProfit.data ?? []).map((p: any) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-medium truncate max-w-[180px]">{p.name}</TableCell>
+                          <TableCell className="text-right">{p.qty}</TableCell>
+                          <TableCell className="text-right">{fmt(p.revenue)}</TableCell>
+                          <TableCell className="text-right">{fmt(p.cost)}</TableCell>
+                          <TableCell className="text-right text-emerald-600 font-medium">
+                            {fmt(p.profit)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {p.revenue > 0
+                              ? `${((p.profit / p.revenue) * 100).toFixed(1)}%`
+                              : "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {(topProfit.data ?? []).length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                            No data
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -348,39 +352,41 @@ function ReportsPage() {
                   <Download className="h-4 w-4" /> CSV
                 </Button>
               </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground mb-2">
+              <CardContent className="p-0 sm:p-6">
+                <p className="text-xs text-muted-foreground mb-4 px-4 sm:px-0">
                   Products with stock but no sales in the last {days} days.
                 </p>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead>SKU</TableHead>
-                      <TableHead className="text-right">Stock</TableHead>
-                      <TableHead className="text-right">Cost</TableHead>
-                      <TableHead className="text-right">Stuck value</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(slow.data ?? []).map((p: any) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="font-medium">{p.name}</TableCell>
-                        <TableCell className="text-muted-foreground">{p.sku || "—"}</TableCell>
-                        <TableCell className="text-right">{p.stock_qty} {p.unit}</TableCell>
-                        <TableCell className="text-right">{fmt(Number(p.cost_price || 0))}</TableCell>
-                        <TableCell className="text-right font-medium">{fmt(p.stock_value)}</TableCell>
-                      </TableRow>
-                    ))}
-                    {(slow.data ?? []).length === 0 && (
+                <div className="overflow-x-auto w-full">
+                  <Table>
+                    <TableHeader>
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-muted-foreground py-6">
-                          No slow-moving items 🎉
-                        </TableCell>
+                        <TableHead className="min-w-[150px]">Product</TableHead>
+                        <TableHead>SKU</TableHead>
+                        <TableHead className="text-right">Stock</TableHead>
+                        <TableHead className="text-right">Cost</TableHead>
+                        <TableHead className="text-right">Stuck value</TableHead>
                       </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {(slow.data ?? []).map((p: any) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-medium truncate max-w-[180px]">{p.name}</TableCell>
+                          <TableCell className="text-muted-foreground">{p.sku || "—"}</TableCell>
+                          <TableCell className="text-right">{p.stock_qty} {p.unit}</TableCell>
+                          <TableCell className="text-right">{fmt(Number(p.cost_price || 0))}</TableCell>
+                          <TableCell className="text-right font-medium">{fmt(p.stock_value)}</TableCell>
+                        </TableRow>
+                      ))}
+                      {(slow.data ?? []).length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center text-muted-foreground py-6">
+                            No slow-moving items 🎉
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -508,11 +514,11 @@ function ReportsPage() {
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
-                    <div className="overflow-auto">
+                    <div className="overflow-x-auto w-full">
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Product</TableHead>
+                            <TableHead className="min-w-[150px]">Product</TableHead>
                             <TableHead className="text-right">Qty</TableHead>
                             <TableHead className="text-right">Revenue</TableHead>
                           </TableRow>
@@ -520,7 +526,7 @@ function ReportsPage() {
                         <TableBody>
                           {top.data.map((p) => (
                             <TableRow key={p.id}>
-                              <TableCell className="font-medium">{p.name}</TableCell>
+                              <TableCell className="font-medium truncate max-w-[180px]">{p.name}</TableCell>
                               <TableCell className="text-right">
                                 {p.qty} {p.unit}
                               </TableCell>
@@ -619,13 +625,13 @@ function ReportsPage() {
                   <Download className="h-4 w-4" /> CSV
                 </Button>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-0 sm:p-6">
                 {low.data && low.data.length ? (
-                  <div className="overflow-auto">
+                  <div className="overflow-x-auto w-full">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Product</TableHead>
+                          <TableHead className="min-w-[150px]">Product</TableHead>
                           <TableHead>SKU</TableHead>
                           <TableHead className="text-right">Stock</TableHead>
                           <TableHead className="text-right">Reorder at</TableHead>
@@ -635,7 +641,7 @@ function ReportsPage() {
                       <TableBody>
                         {low.data.map((p: any) => (
                           <TableRow key={p.id}>
-                            <TableCell className="font-medium">{p.name}</TableCell>
+                            <TableCell className="font-medium truncate max-w-[180px]">{p.name}</TableCell>
                             <TableCell className="text-muted-foreground">
                               {p.sku || "—"}
                             </TableCell>
@@ -658,7 +664,9 @@ function ReportsPage() {
                     </Table>
                   </div>
                 ) : (
-                  <Empty message="All products are above reorder level." />
+                  <div className="p-6">
+                    <Empty message="All products are above reorder level." />
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -672,11 +680,11 @@ function ReportsPage() {
 function Kpi({ label, value }: { label: string; value: string }) {
   return (
     <Card className="border-border/60 shadow-soft">
-      <CardContent className="p-5">
-        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <CardContent className="p-4 sm:p-5">
+        <div className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-muted-foreground truncate">
           {label}
         </div>
-        <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
+        <div className="mt-1 sm:mt-2 text-lg sm:text-2xl font-bold tracking-tight truncate">{value}</div>
       </CardContent>
     </Card>
   );
