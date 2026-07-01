@@ -388,3 +388,133 @@ export const inventorySummary = createServerFn({ method: "GET" })
     }
     return { totalSkus, activeSkus, inventoryCost, inventoryRetail, lowStock, outOfStock };
   });
+
+// ---------- Bulk import ----------
+const bulkProductSchema = z.object({
+  shop_id: z.string(),
+  products: z.array(
+    z.object({
+      name: z.string().trim().min(1).max(160),
+      sku: z.string().trim().max(60).optional().nullable(),
+      barcode: z.string().trim().max(60).optional().nullable(),
+      unit: z.string().trim().min(1).max(20).default("pcs"),
+      mrp: z.coerce.number().min(0).default(0),
+      sale_price: z.coerce.number().min(0).default(0),
+      cost_price: z.coerce.number().min(0).default(0),
+      tax_rate: z.coerce.number().min(0).max(100).default(0),
+      hsn_code: z.string().trim().max(20).optional().nullable(),
+      category_id: z.string().optional().nullable(),
+      opening_stock: z.coerce.number().min(0).default(0),
+      track_stock: z.boolean().default(true),
+      reorder_level: z.coerce.number().min(0).default(0),
+    })
+  ),
+});
+
+export const bulkImportProducts = createServerFn({ method: "POST" })
+  .middleware([requireAppwriteAuth])
+  .inputValidator((d: unknown) => bulkProductSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await ensureMember(context.databases, context.userId, data.shop_id);
+
+    // Fetch existing product names to check duplicates
+    const existing = await context.databases.listDocuments(
+      APPWRITE_DATABASE_ID,
+      "products",
+      [
+        Query.equal("shop_id", data.shop_id),
+        Query.limit(2000),
+        Query.select(["name", "sku", "barcode"]),
+      ]
+    );
+    const existingNames = new Set(
+      existing.documents.map((d: any) => (d.name || "").trim().toLowerCase())
+    );
+    const existingSkus = new Set(
+      existing.documents
+        .map((d: any) => (d.sku || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const existingBarcodes = new Set(
+      existing.documents
+        .map((d: any) => (d.barcode || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    let created = 0;
+    let skipped = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (const row of data.products) {
+      const nameLower = row.name.trim().toLowerCase();
+
+      // Duplicate check: name, sku, or barcode
+      if (existingNames.has(nameLower)) {
+        skipped++;
+        continue;
+      }
+      if (row.sku && existingSkus.has(row.sku.trim().toLowerCase())) {
+        skipped++;
+        continue;
+      }
+      if (row.barcode && existingBarcodes.has(row.barcode.trim().toLowerCase())) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        const productId = ID.unique();
+        await context.databases.createDocument(
+          APPWRITE_DATABASE_ID,
+          "products",
+          productId,
+          {
+            shop_id: data.shop_id,
+            name: row.name.trim(),
+            sku: row.sku || null,
+            barcode: row.barcode || null,
+            unit: row.unit || "pcs",
+            mrp: row.mrp || 0,
+            sale_price: row.sale_price || 0,
+            cost_price: row.cost_price || 0,
+            tax_rate: row.tax_rate || 0,
+            hsn_code: row.hsn_code || null,
+            category_id: row.category_id || null,
+            track_stock: row.track_stock ?? true,
+            reorder_level: row.reorder_level || 0,
+            stock_qty: row.opening_stock || 0,
+            is_active: true,
+            created_by: context.userId,
+          }
+        );
+
+        if (row.opening_stock && row.opening_stock > 0) {
+          await context.databases.createDocument(
+            APPWRITE_DATABASE_ID,
+            "stock_movements",
+            ID.unique(),
+            {
+              shop_id: data.shop_id,
+              product_id: productId,
+              type: "opening",
+              quantity: row.opening_stock,
+              note: "Opening stock (CSV import)",
+              created_by: context.userId,
+            }
+          );
+        }
+
+        // Track newly added names/skus/barcodes to prevent intra-batch duplicates
+        existingNames.add(nameLower);
+        if (row.sku) existingSkus.add(row.sku.trim().toLowerCase());
+        if (row.barcode) existingBarcodes.add(row.barcode.trim().toLowerCase());
+        created++;
+      } catch (err: any) {
+        failed++;
+        errors.push(`${row.name}: ${err?.message || "Unknown error"}`);
+      }
+    }
+
+    return { created, skipped, failed, errors: errors.slice(0, 10) };
+  });

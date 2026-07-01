@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Plus,
@@ -16,6 +16,12 @@ import {
   Trash2,
   TrendingUp,
   TrendingDown,
+  Upload,
+  FileSpreadsheet,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  SkipForward,
 } from "lucide-react";
 import { Route as AuthRoute } from "./route";
 import { AppShell } from "@/components/layout/AppShell";
@@ -70,6 +76,7 @@ import {
 import { getMyProfile, listMyShops } from "@/lib/shops.functions";
 import {
   adjustStock,
+  bulkImportProducts,
   createCategory,
   createProduct,
   deleteCategory,
@@ -174,6 +181,7 @@ function InventoryPage() {
   const [showCategoriesDialog, setShowCategoriesDialog] = useState(false);
   const [adjustTarget, setAdjustTarget] = useState<ProductRow | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ProductRow | null>(null);
+  const [showCSVImport, setShowCSVImport] = useState(false);
 
   const deleteFn = useServerFn(deleteProduct);
   const deleteMut = useMutation({
@@ -206,9 +214,12 @@ function InventoryPage() {
               Manage products, categories, stock, and pricing.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" onClick={() => setShowCategoriesDialog(true)}>
               <Tag className="h-4 w-4" /> Categories
+            </Button>
+            <Button variant="outline" onClick={() => setShowCSVImport(true)} disabled={!shopId}>
+              <Upload className="h-4 w-4" /> CSV Import
             </Button>
             <Button
               onClick={() => {
@@ -493,6 +504,13 @@ function InventoryPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {shopId && (
+        <CSVImportDialog
+          open={showCSVImport}
+          onOpenChange={setShowCSVImport}
+          shopId={shopId}
+        />
+      )}
     </AppShell>
   );
 }
@@ -1090,6 +1108,362 @@ function AdjustStockDialog({
             {mutation.isPending ? "Saving…" : "Apply"}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------- CSV Import Dialog ----------
+function parseCSV(text: string): Record<string, string>[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return [];
+
+  // Detect delimiter
+  const firstLine = lines[0];
+  const delimiter = firstLine.includes("\t") ? "\t" : ",";
+
+  const parseRow = (line: string): string[] => {
+    const result: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === delimiter && !inQuotes) {
+        result.push(current.trim());
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  };
+
+  const headers = parseRow(lines[0]).map((h) =>
+    h.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "")
+  );
+
+  return lines.slice(1).map((line) => {
+    const vals = parseRow(line);
+    const obj: Record<string, string> = {};
+    headers.forEach((h, i) => {
+      if (h && vals[i] !== undefined) obj[h] = vals[i];
+    });
+    return obj;
+  }).filter((row) => Object.values(row).some((v) => v.trim()));
+}
+
+const CSV_COLUMN_MAP: Record<string, string> = {
+  product_name: "name", product: "name", item: "name", item_name: "name",
+  price: "sale_price", selling_price: "sale_price", sp: "sale_price", rate: "sale_price",
+  cost: "cost_price", purchase_price: "cost_price", cp: "cost_price", buying_price: "cost_price",
+  maximum_retail_price: "mrp", retail_price: "mrp",
+  tax: "tax_rate", gst: "tax_rate", gst_rate: "tax_rate", tax_percent: "tax_rate",
+  hsn: "hsn_code", sac_code: "hsn_code",
+  stock: "opening_stock", qty: "opening_stock", quantity: "opening_stock", opening_qty: "opening_stock",
+  uom: "unit", unit_of_measure: "unit",
+  reorder: "reorder_level", min_stock: "reorder_level", reorder_point: "reorder_level",
+  code: "barcode", ean: "barcode", upc: "barcode",
+};
+
+function normalizeRow(raw: Record<string, string>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [key, val] of Object.entries(raw)) {
+    const mapped = CSV_COLUMN_MAP[key] || key;
+    if (!out[mapped]) out[mapped] = val; // first match wins
+  }
+  return out;
+}
+
+const SAMPLE_CSV = `name,sku,barcode,unit,mrp,sale_price,cost_price,tax_rate,hsn_code,opening_stock,reorder_level
+Aashirvaad Atta 5kg,ATT-5KG,8901063083578,pcs,320,299,250,5,1101,50,10
+Tata Salt 1kg,SALT-1KG,8901725181123,pcs,28,24,20,18,2501,100,25
+Amul Butter 500g,AMUL-BTR-500,8901262150309,pcs,275,265,230,12,0405,30,5`;
+
+function CSVImportDialog({
+  open,
+  onOpenChange,
+  shopId,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  shopId: string;
+}) {
+  const qc = useQueryClient();
+  const importFn = useServerFn(bulkImportProducts);
+
+  const [parsed, setParsed] = useState<Record<string, any>[]>([]);
+  const [fileName, setFileName] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<{ created: number; skipped: number; failed: number; errors: string[] } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const reset = () => {
+    setParsed([]);
+    setFileName("");
+    setResult(null);
+    setImporting(false);
+  };
+
+  useEffect(() => {
+    if (!open) reset();
+  }, [open]);
+
+  const handleFile = (file: File) => {
+    if (!file) return;
+    setFileName(file.name);
+    setResult(null);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const rows = parseCSV(text).map(normalizeRow);
+      // Filter out rows without a name
+      const valid = rows.filter((r) => r.name && r.name.trim());
+      setParsed(valid);
+      if (valid.length === 0) {
+        toast.error("No valid products found in CSV. Make sure there's a 'name' column.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  };
+
+  const handleImport = async () => {
+    if (parsed.length === 0) return;
+    setImporting(true);
+    setResult(null);
+
+    try {
+      const products = parsed.map((row) => ({
+        name: String(row.name || "").trim(),
+        sku: row.sku || null,
+        barcode: row.barcode || null,
+        unit: row.unit || "pcs",
+        mrp: Number(row.mrp) || 0,
+        sale_price: Number(row.sale_price) || 0,
+        cost_price: Number(row.cost_price) || 0,
+        tax_rate: Number(row.tax_rate) || 0,
+        hsn_code: row.hsn_code || null,
+        opening_stock: Number(row.opening_stock) || 0,
+        track_stock: true,
+        reorder_level: Number(row.reorder_level) || 0,
+      }));
+
+      const res = await importFn({ data: { shop_id: shopId, products } });
+      setResult(res as any);
+      qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["inv-summary"] });
+      if ((res as any).created > 0) {
+        toast.success(`${(res as any).created} products imported!`);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const downloadSample = () => {
+    const blob = new Blob([SAMPLE_CSV], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "sample_products.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileSpreadsheet className="h-5 w-5" /> CSV Bulk Import
+          </DialogTitle>
+          <DialogDescription>
+            Upload a CSV file to add products in bulk. Duplicate products (same name, SKU, or barcode) will be skipped automatically.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Results screen */}
+        {result && (
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-lg border bg-emerald-50 dark:bg-emerald-950/30 p-4 text-center">
+                <CheckCircle2 className="h-6 w-6 text-emerald-600 mx-auto mb-1" />
+                <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{result.created}</div>
+                <div className="text-xs text-muted-foreground">Created</div>
+              </div>
+              <div className="rounded-lg border bg-amber-50 dark:bg-amber-950/30 p-4 text-center">
+                <SkipForward className="h-6 w-6 text-amber-600 mx-auto mb-1" />
+                <div className="text-2xl font-bold text-amber-700 dark:text-amber-400">{result.skipped}</div>
+                <div className="text-xs text-muted-foreground">Skipped (duplicates)</div>
+              </div>
+              <div className="rounded-lg border bg-red-50 dark:bg-red-950/30 p-4 text-center">
+                <XCircle className="h-6 w-6 text-red-600 mx-auto mb-1" />
+                <div className="text-2xl font-bold text-red-700 dark:text-red-400">{result.failed}</div>
+                <div className="text-xs text-muted-foreground">Failed</div>
+              </div>
+            </div>
+            {result.errors.length > 0 && (
+              <div className="rounded-md border border-red-200 bg-red-50 dark:bg-red-950/20 p-3 text-xs space-y-1">
+                {result.errors.map((e, i) => (
+                  <div key={i} className="text-red-700 dark:text-red-400">• {e}</div>
+                ))}
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={reset}>Import more</Button>
+              <Button onClick={() => onOpenChange(false)}>Done</Button>
+            </DialogFooter>
+          </div>
+        )}
+
+        {/* Upload + preview screen */}
+        {!result && (
+          <>
+            {parsed.length === 0 ? (
+              <div className="space-y-4 py-2">
+                {/* Drop zone */}
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={handleDrop}
+                  onClick={() => fileRef.current?.click()}
+                  className="border-2 border-dashed rounded-xl p-10 text-center cursor-pointer hover:border-primary/50 hover:bg-accent/30 transition-colors"
+                >
+                  <Upload className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+                  <div className="text-sm font-medium">
+                    Drop your CSV file here, or click to browse
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Supports .csv and .tsv files
+                  </div>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".csv,.tsv,.txt"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFile(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </div>
+
+                {/* Sample download */}
+                <div className="flex items-center justify-between rounded-md border bg-muted/30 px-4 py-2.5">
+                  <div className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">Need a template?</span>{" "}
+                    Download our sample CSV with the correct column headers.
+                  </div>
+                  <Button size="sm" variant="outline" className="text-xs h-7" onClick={downloadSample}>
+                    <FileSpreadsheet className="h-3 w-3 mr-1" /> Sample CSV
+                  </Button>
+                </div>
+
+                {/* Column reference */}
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <div className="font-medium text-foreground mb-1">Supported columns:</div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5">
+                    <span><strong>name</strong> (required)</span>
+                    <span>sku</span>
+                    <span>barcode</span>
+                    <span>unit</span>
+                    <span>mrp</span>
+                    <span>sale_price / price</span>
+                    <span>cost_price / cost</span>
+                    <span>tax_rate / gst</span>
+                    <span>hsn_code / hsn</span>
+                    <span>opening_stock / qty</span>
+                    <span>reorder_level</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4 py-2">
+                {/* File info */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm">
+                    <FileSpreadsheet className="h-4 w-4 text-primary" />
+                    <span className="font-medium">{fileName}</span>
+                    <Badge variant="secondary">{parsed.length} products</Badge>
+                  </div>
+                  <Button size="sm" variant="ghost" className="text-xs" onClick={reset}>
+                    Change file
+                  </Button>
+                </div>
+
+                {/* Preview table */}
+                <div className="rounded-md border overflow-x-auto max-h-[300px] overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/30">
+                        <TableHead className="text-xs">#</TableHead>
+                        <TableHead className="text-xs">Name</TableHead>
+                        <TableHead className="text-xs">SKU</TableHead>
+                        <TableHead className="text-xs">Unit</TableHead>
+                        <TableHead className="text-xs text-right">MRP</TableHead>
+                        <TableHead className="text-xs text-right">Sale ₹</TableHead>
+                        <TableHead className="text-xs text-right">Cost ₹</TableHead>
+                        <TableHead className="text-xs text-right">Tax%</TableHead>
+                        <TableHead className="text-xs text-right">Stock</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {parsed.slice(0, 50).map((row, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="text-xs text-muted-foreground">{i + 1}</TableCell>
+                          <TableCell className="text-xs font-medium max-w-[200px] truncate">{row.name}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{row.sku || "—"}</TableCell>
+                          <TableCell className="text-xs">{row.unit || "pcs"}</TableCell>
+                          <TableCell className="text-xs text-right">{Number(row.mrp) || 0}</TableCell>
+                          <TableCell className="text-xs text-right">{Number(row.sale_price) || 0}</TableCell>
+                          <TableCell className="text-xs text-right">{Number(row.cost_price) || 0}</TableCell>
+                          <TableCell className="text-xs text-right">{Number(row.tax_rate) || 0}</TableCell>
+                          <TableCell className="text-xs text-right">{Number(row.opening_stock) || 0}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  {parsed.length > 50 && (
+                    <div className="text-xs text-center text-muted-foreground py-2 border-t">
+                      Showing first 50 of {parsed.length} products
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter className="flex gap-2 sm:justify-end">
+                  <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+                  <Button onClick={handleImport} disabled={importing}>
+                    {importing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-1" /> Importing…
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4 mr-1" /> Import {parsed.length} products
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </div>
+            )}
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
