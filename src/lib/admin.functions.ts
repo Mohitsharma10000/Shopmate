@@ -17,7 +17,15 @@ export const getAdminOverview = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     requirePlatformOwner(context.user.email);
 
-    const admin = createAdminClient();
+    let admin;
+    try {
+      admin = createAdminClient();
+    } catch (err: any) {
+      console.error("[Admin Overview] Failed to create admin client:", err);
+      throw new Error(
+        "Server configuration error: APPWRITE_API_KEY is missing. Please add it to your environment variables (Lovable Dashboard → Settings → Environment Variables)."
+      );
+    }
 
     // 1. Fetch registered users from Appwrite Auth
     const usersRes = await admin.users.list();
@@ -132,7 +140,15 @@ export const adminToggleUserSubscription = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     requirePlatformOwner(context.user.email);
 
-    const admin = createAdminClient();
+    let admin;
+    try {
+      admin = createAdminClient();
+    } catch (err: any) {
+      console.error("[Admin Sub Toggle] Failed to create admin client:", err);
+      throw new Error(
+        "Server configuration error: APPWRITE_API_KEY is missing. Please add it to your environment variables (Lovable Dashboard → Settings → Environment Variables)."
+      );
+    }
 
     try {
       console.log(`[Admin Sub Toggle] Attempting to update profile for user: ${data.target_user_id} to status: ${data.status}`);
@@ -144,13 +160,18 @@ export const adminToggleUserSubscription = createServerFn({ method: "POST" })
           subscription_status: data.status,
         }
       );
+      console.log(`[Admin Sub Toggle] Successfully updated profile for user: ${data.target_user_id} to status: ${data.status}`);
+      return { ok: true };
     } catch (err: any) {
       console.error("[Admin Sub Toggle] Update failed. Error details:", err);
       
+      const errMsg = String(err.message || "").toLowerCase();
+      const errType = String(err.type || "").toLowerCase();
+      
       const isUnknownAttribute = 
-        String(err.message || "").toLowerCase().includes("unknown attribute") ||
-        String(err.message || "").toLowerCase().includes("attribute not found") ||
-        String(err.message || "").toLowerCase().includes("invalid document structure");
+        errMsg.includes("unknown attribute") ||
+        errMsg.includes("attribute not found") ||
+        errMsg.includes("invalid document structure");
 
       if (isUnknownAttribute) {
         console.log("[Admin Sub Toggle] Unknown attribute detected. Initiating self-healing...");
@@ -178,8 +199,8 @@ export const adminToggleUserSubscription = createServerFn({ method: "POST" })
       const isNotFound = 
         err.code === 404 || 
         err.status === 404 || 
-        String(err.message || "").toLowerCase().includes("not found") ||
-        String(err.type || "").toLowerCase().includes("not_found");
+        errMsg.includes("not found") ||
+        errType.includes("not_found");
 
       if (isNotFound) {
         console.log(`[Admin Sub Toggle] Profile not found. Creating new profile for user: ${data.target_user_id}`);
@@ -204,6 +225,7 @@ export const adminToggleUserSubscription = createServerFn({ method: "POST" })
               active_shop_id: null,
             }
           );
+          return { ok: true };
         } catch (createErr: any) {
           const isCreateUnknown = String(createErr.message || "").toLowerCase().includes("unknown attribute") || String(createErr.message || "").toLowerCase().includes("invalid document structure");
           if (isCreateUnknown) {
@@ -212,10 +234,13 @@ export const adminToggleUserSubscription = createServerFn({ method: "POST" })
           }
           throw createErr;
         }
-      } else {
-        throw new Error(err.message || "Failed to update user subscription status");
       }
-    }
+      
+      // Permission error
+      if (err.code === 401 || err.code === 403) {
+        throw new Error("API key does not have sufficient permissions. Ensure your APPWRITE_API_KEY has 'databases.read' and 'databases.write' scopes.");
+      }
 
-    return { ok: true };
+      throw new Error(err.message || "Failed to update user subscription status");
+    }
   });
