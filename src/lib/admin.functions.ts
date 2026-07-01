@@ -84,6 +84,41 @@ export const getAdminOverview = createServerFn({ method: "GET" })
     };
   });
 
+// Helper function to programmatically create missing attributes in the profiles collection
+async function ensureProfilesAttributesExist(databases: any) {
+  try {
+    await databases.createStringAttribute(
+      APPWRITE_DATABASE_ID,
+      "profiles",
+      "subscription_status",
+      20,
+      false, // required
+      "inactive" // default value
+    );
+    console.log("[Self-Healing] Requested creation of subscription_status attribute.");
+  } catch (err: any) {
+    if (!err.message?.includes("already exists") && !err.message?.includes("duplicated")) {
+      console.error("[Self-Healing] Failed to create subscription_status attribute:", err);
+    }
+  }
+
+  try {
+    await databases.createStringAttribute(
+      APPWRITE_DATABASE_ID,
+      "profiles",
+      "razorpay_payment_id",
+      100,
+      false, // required
+      null // default value
+    );
+    console.log("[Self-Healing] Requested creation of razorpay_payment_id attribute.");
+  } catch (err: any) {
+    if (!err.message?.includes("already exists") && !err.message?.includes("duplicated")) {
+      console.error("[Self-Healing] Failed to create razorpay_payment_id attribute:", err);
+    }
+  }
+}
+
 export const adminToggleUserSubscription = createServerFn({ method: "POST" })
   .middleware([requireAppwriteAuth])
   .inputValidator((data: unknown) =>
@@ -112,6 +147,34 @@ export const adminToggleUserSubscription = createServerFn({ method: "POST" })
     } catch (err: any) {
       console.error("[Admin Sub Toggle] Update failed. Error details:", err);
       
+      const isUnknownAttribute = 
+        String(err.message || "").toLowerCase().includes("unknown attribute") ||
+        String(err.message || "").toLowerCase().includes("attribute not found") ||
+        String(err.message || "").toLowerCase().includes("invalid document structure");
+
+      if (isUnknownAttribute) {
+        console.log("[Admin Sub Toggle] Unknown attribute detected. Initiating self-healing...");
+        await ensureProfilesAttributesExist(admin.databases);
+        // Wait 3 seconds for Appwrite to create and activate the attribute
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+
+        // Retry the update
+        try {
+          await admin.databases.updateDocument(
+            APPWRITE_DATABASE_ID,
+            "profiles",
+            data.target_user_id,
+            {
+              subscription_status: data.status,
+            }
+          );
+          return { ok: true };
+        } catch (retryErr: any) {
+          console.error("[Admin Sub Toggle] Retry failed:", retryErr);
+          throw new Error("Missing 'subscription_status' attribute in Appwrite database profiles collection. We tried to create it, but Appwrite is still processing. Please wait 10 seconds and try again, or create 'subscription_status' (String, Size 20, default 'inactive') manually in the Appwrite Console.");
+        }
+      }
+
       const isNotFound = 
         err.code === 404 || 
         err.status === 404 || 
@@ -128,18 +191,27 @@ export const adminToggleUserSubscription = createServerFn({ method: "POST" })
           console.error("[Admin Sub Toggle] Failed to fetch user details from Appwrite Auth:", userErr);
         }
 
-        await admin.databases.createDocument(
-          APPWRITE_DATABASE_ID,
-          "profiles",
-          data.target_user_id,
-          {
-            full_name: fullName,
-            subscription_status: data.status,
-            avatar_url: null,
-            phone: null,
-            active_shop_id: null,
+        try {
+          await admin.databases.createDocument(
+            APPWRITE_DATABASE_ID,
+            "profiles",
+            data.target_user_id,
+            {
+              full_name: fullName,
+              subscription_status: data.status,
+              avatar_url: null,
+              phone: null,
+              active_shop_id: null,
+            }
+          );
+        } catch (createErr: any) {
+          const isCreateUnknown = String(createErr.message || "").toLowerCase().includes("unknown attribute") || String(createErr.message || "").toLowerCase().includes("invalid document structure");
+          if (isCreateUnknown) {
+            await ensureProfilesAttributesExist(admin.databases);
+            throw new Error("Appwrite profiles collection lacks the 'subscription_status' attribute. We initiated auto-creation. Please wait 10 seconds and try again.");
           }
-        );
+          throw createErr;
+        }
       } else {
         throw new Error(err.message || "Failed to update user subscription status");
       }
