@@ -139,7 +139,30 @@ function SubscribePage() {
       prefill: {
         email: user?.email || "",
         name: user?.name || "",
-        method: "upi", // Prefill UPI payment method
+      },
+      config: {
+        display: {
+          blocks: {
+            upi: {
+              name: "Pay using UPI",
+              instruments: [
+                { method: "upi", flows: ["collect", "intent", "qr"] },
+              ],
+            },
+            other: {
+              name: "Other Payment Methods",
+              instruments: [
+                { method: "card" },
+                { method: "netbanking" },
+                { method: "wallet" },
+              ],
+            },
+          },
+          sequence: ["block.upi", "block.other"],
+          preferences: {
+            show_default_blocks: false,
+          },
+        },
       },
       theme: {
         color: "#6C3CE1",

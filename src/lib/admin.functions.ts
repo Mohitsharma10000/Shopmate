@@ -100,6 +100,7 @@ export const adminToggleUserSubscription = createServerFn({ method: "POST" })
     const admin = createAdminClient();
 
     try {
+      console.log(`[Admin Sub Toggle] Attempting to update profile for user: ${data.target_user_id} to status: ${data.status}`);
       await admin.databases.updateDocument(
         APPWRITE_DATABASE_ID,
         "profiles",
@@ -109,17 +110,34 @@ export const adminToggleUserSubscription = createServerFn({ method: "POST" })
         }
       );
     } catch (err: any) {
-      if (err.code === 404) {
-        // Fetch user from auth to get name
-        const userDetails = await admin.users.get(data.target_user_id);
-        // Create profile if missing
+      console.error("[Admin Sub Toggle] Update failed. Error details:", err);
+      
+      const isNotFound = 
+        err.code === 404 || 
+        err.status === 404 || 
+        String(err.message || "").toLowerCase().includes("not found") ||
+        String(err.type || "").toLowerCase().includes("not_found");
+
+      if (isNotFound) {
+        console.log(`[Admin Sub Toggle] Profile not found. Creating new profile for user: ${data.target_user_id}`);
+        let fullName = null;
+        try {
+          const userDetails = await admin.users.get(data.target_user_id);
+          fullName = userDetails.name || null;
+        } catch (userErr) {
+          console.error("[Admin Sub Toggle] Failed to fetch user details from Appwrite Auth:", userErr);
+        }
+
         await admin.databases.createDocument(
           APPWRITE_DATABASE_ID,
           "profiles",
           data.target_user_id,
           {
-            full_name: userDetails.name || null,
+            full_name: fullName,
             subscription_status: data.status,
+            avatar_url: null,
+            phone: null,
+            active_shop_id: null,
           }
         );
       } else {
