@@ -972,7 +972,7 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-function ReceiptDialog({
+export function ReceiptDialog({
   open,
   onClose,
   sale,

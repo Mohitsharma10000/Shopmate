@@ -16,6 +16,7 @@ import {
 import { Route as AuthRoute } from "./route";
 import { AppShell } from "@/components/layout/AppShell";
 import { InlineScanner } from "@/components/BarcodeScanner";
+import { ReceiptDialog } from "./pos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -123,6 +124,7 @@ function ScannerRegister({ shopId }: { shopId: string }) {
   const [method, setMethod] = useState<"cash" | "card" | "upi">("cash");
   const [manualCode, setManualCode] = useState("");
   const [lastScanned, setLastScanned] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<any | null>(null);
 
   const sumQ = useQuery({
     queryKey: ["sales-summary", shopId],
@@ -237,6 +239,7 @@ function ScannerRegister({ shopId }: { shopId: string }) {
       }),
     onSuccess: (sale: any) => {
       toast.success(`Sale ${sale.invoice_number} recorded!`);
+      setReceipt({ ...sale, items: [...cart], totals: { ...totals } });
       setCart([]);
       setDiscount(0);
       setPaid("");
@@ -436,6 +439,12 @@ function ScannerRegister({ shopId }: { shopId: string }) {
           )}
         </CardContent>
       </Card>
+      
+      <ReceiptDialog
+        open={!!receipt}
+        onClose={() => setReceipt(null)}
+        sale={receipt}
+      />
     </div>
   );
 }
