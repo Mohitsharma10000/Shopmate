@@ -17,7 +17,7 @@ import {
   LayoutDashboard,
   Package,
   ScanLine,
-  BarChart3,
+  Camera,
   Settings,
   Store,
   Truck,
@@ -29,10 +29,10 @@ import { toast } from "sonner";
 const nav = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Point of Sale", url: "/pos", icon: ScanLine },
+  { title: "Scanner", url: "/scanner", icon: Camera },
   { title: "Inventory", url: "/inventory", icon: Package },
   { title: "Purchases", url: "/purchases", icon: Truck },
   { title: "Customers", url: "/customers", icon: Users },
-  { title: "Reports", url: "/reports", icon: BarChart3 },
 ];
 
 const settings = [{ title: "Settings", url: "/settings/shop", icon: Settings }];

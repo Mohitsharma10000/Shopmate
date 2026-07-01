@@ -137,9 +137,9 @@ function Dashboard() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => navigate({ to: "/reports" })}
+                onClick={() => navigate({ to: "/scanner" })}
               >
-                View reports
+                View scanner
               </Button>
             </CardHeader>
             <CardContent>
