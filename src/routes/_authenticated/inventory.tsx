@@ -22,9 +22,11 @@ import {
   CheckCircle2,
   XCircle,
   SkipForward,
+  ScanLine,
 } from "lucide-react";
 import { Route as AuthRoute } from "./route";
 import { AppShell } from "@/components/layout/AppShell";
+import { BarcodeScanner } from "@/components/BarcodeScanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -588,6 +590,7 @@ function ProductDialog({
     is_active: true,
   };
   const [form, setForm] = useState(empty);
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -687,12 +690,24 @@ function ProductDialog({
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="p-barcode">Barcode</Label>
-              <Input
-                id="p-barcode"
-                value={form.barcode}
-                onChange={(e) => setField("barcode", e.target.value)}
-                placeholder="EAN / UPC"
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="p-barcode"
+                  value={form.barcode}
+                  onChange={(e) => setField("barcode", e.target.value)}
+                  placeholder="EAN / UPC"
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowBarcodeScanner(true)}
+                  title="Scan barcode"
+                >
+                  <ScanLine className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -828,6 +843,16 @@ function ProductDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <BarcodeScanner
+        open={showBarcodeScanner}
+        title="Scan Product Barcode"
+        onScan={(code) => {
+          setField("barcode", code);
+          setShowBarcodeScanner(false);
+          toast.success(`Barcode scanned: ${code}`);
+        }}
+        onClose={() => setShowBarcodeScanner(false)}
+      />
     </Dialog>
   );
 }

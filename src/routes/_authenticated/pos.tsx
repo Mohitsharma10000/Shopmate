@@ -22,6 +22,7 @@ import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { Route as AuthRoute } from "./route";
 import { AppShell } from "@/components/layout/AppShell";
+import { BarcodeScanner } from "@/components/BarcodeScanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -154,6 +155,7 @@ function Register({ shopId }: { shopId: string }) {
   const [search, setSearch] = useState("");
   const [scan, setScan] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [showPosScanner, setShowPosScanner] = useState(false);
   const [discount, setDiscount] = useState(0);
   const [paid, setPaid] = useState<string>("");
   const [method, setMethod] = useState<"cash" | "card" | "upi" | "credit">("cash");
@@ -316,6 +318,15 @@ function Register({ shopId }: { shopId: string }) {
               className="pl-9"
             />
           </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={() => setShowPosScanner(true)}
+            title="Scan barcode to add product"
+          >
+            <ScanLine className="h-4 w-4" />
+          </Button>
           <Button type="submit" variant="secondary">Add</Button>
         </form>
         <div className="relative">
@@ -530,6 +541,26 @@ function Register({ shopId }: { shopId: string }) {
         open={!!receipt}
         onClose={() => setReceipt(null)}
         sale={receipt}
+      />
+      <BarcodeScanner
+        open={showPosScanner}
+        title="Scan Product to Add"
+        onScan={async (code) => {
+          setShowPosScanner(false);
+          try {
+            const product = (await lookup({ data: { shop_id: shopId, code } })) as Product | null;
+            if (product) {
+              addToCart(product);
+              toast.success(`${product.name} added to cart`);
+            } else {
+              toast.error(`No product found for barcode: ${code}`);
+            }
+          } catch (e: any) {
+            console.error("Scanner lookup failed", e);
+            toast.error("Could not find product for this barcode");
+          }
+        }}
+        onClose={() => setShowPosScanner(false)}
       />
     </div>
   );
