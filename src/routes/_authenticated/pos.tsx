@@ -865,8 +865,29 @@ async function generateReceiptPDF(sale: any, shopName: string) {
   doc.setFontSize(7);
   doc.text("Thank you!", w / 2, y, { align: "center" });
 
-  // Save
-  doc.save(`Invoice_${sale.invoice_number}.pdf`);
+  // Generate PDF as Blob
+  const blob = doc.output("blob");
+  const blobUrl = URL.createObjectURL(blob);
+
+  // Attempt direct download via anchor
+  try {
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = `Invoice_${sale.invoice_number}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch (err) {
+    console.error("Direct download failed", err);
+  }
+
+  // Mobile fallback: Open in a new tab so users can view, print, or share/save
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+  if (isMobile) {
+    window.open(blobUrl, "_blank");
+  }
 }
 
 function ReceiptDialog({
