@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, redirect } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { account, authEvents, databases, APPWRITE_DATABASE_ID } from "@/integrations/appwrite/client";
 import { ID, OAuthProvider } from "appwrite";
 import { Button } from "@/components/ui/button";
@@ -36,10 +36,50 @@ function AuthPage() {
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
 
+  // Auto-redirect if session exists in browser on page load
+  useEffect(() => {
+    async function checkSession() {
+      try {
+        const currentUser = await account.get();
+        if (currentUser) {
+          toast.success("You are already signed in. Redirecting to dashboard...");
+          navigate({ to: "/dashboard" });
+        }
+      } catch {
+        // No active session, stay on auth page
+      }
+    }
+    checkSession();
+  }, [navigate]);
+
   async function handleEmail(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
+      // 1. Check if a session already exists
+      let existingUser = null;
+      try {
+        existingUser = await account.get();
+      } catch {
+        // No active session
+      }
+
+      if (existingUser) {
+        if (existingUser.email.toLowerCase() === email.trim().toLowerCase()) {
+          toast.success("You are already signed in.");
+          authEvents.notify();
+          navigate({ to: "/dashboard" });
+          return;
+        } else {
+          // Different user: delete current session first
+          try {
+            await account.deleteSession("current");
+          } catch (deleteErr) {
+            console.error("Failed to delete existing session:", deleteErr);
+          }
+        }
+      }
+
       if (mode === "signup") {
         const userId = ID.unique();
         const displayName = name.trim() || email.split("@")[0];
@@ -53,8 +93,18 @@ function AuthPage() {
         );
         
         // 2. Create the Session
-        await account.createEmailPasswordSession(email.trim(), password);
-
+        try {
+          await account.createEmailPasswordSession(email.trim(), password);
+        } catch (sessErr: any) {
+          if (sessErr?.message?.includes("session is active") || sessErr?.type === "user_session_already_exists") {
+            // If session already exists somehow, clear and retry
+            await account.deleteSession("current");
+            await account.createEmailPasswordSession(email.trim(), password);
+          } else {
+            throw sessErr;
+          }
+        }
+        
         // 3. Create the user profile document in the profiles collection
         try {
           await databases.createDocument(
@@ -75,12 +125,28 @@ function AuthPage() {
 
         toast.success("Account created. You're signed in.");
       } else {
-        await account.createEmailPasswordSession(email.trim(), password);
+        try {
+          await account.createEmailPasswordSession(email.trim(), password);
+        } catch (sessErr: any) {
+          if (sessErr?.message?.includes("session is active") || sessErr?.type === "user_session_already_exists") {
+            // If session already exists somehow, clear and retry
+            await account.deleteSession("current");
+            await account.createEmailPasswordSession(email.trim(), password);
+          } else {
+            throw sessErr;
+          }
+        }
       }
       authEvents.notify();
       navigate({ to: "/dashboard" });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } catch (err: any) {
+      if (err?.message?.includes("session is active") || err?.type === "user_session_already_exists") {
+        toast.info("Active session detected. Redirecting to dashboard...");
+        authEvents.notify();
+        navigate({ to: "/dashboard" });
+      } else {
+        toast.error(err instanceof Error ? err.message : "Something went wrong");
+      }
     } finally {
       setBusy(false);
     }
@@ -89,14 +155,25 @@ function AuthPage() {
   async function handleGoogle() {
     setGoogleBusy(true);
     try {
+      // Clear any existing session before starting OAuth to prevent conflict when redirecting back
+      try {
+        await account.deleteSession("current");
+      } catch {
+        // No session to delete, ignore
+      }
       await account.createOAuth2Session(
         OAuthProvider.Google,
         window.location.origin + "/dashboard", // redirect on success
         window.location.origin + "/auth" // redirect on failure
       );
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Google sign-in failed");
-      setGoogleBusy(false);
+    } catch (err: any) {
+      if (err?.message?.includes("session is active") || err?.type === "user_session_already_exists") {
+        toast.info("Already logged in. Redirecting to dashboard...");
+        navigate({ to: "/dashboard" });
+      } else {
+        toast.error(err instanceof Error ? err.message : "Google sign-in failed");
+        setGoogleBusy(false);
+      }
     }
   }
 
