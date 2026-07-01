@@ -13,6 +13,9 @@ import {
   IndianRupee,
   Printer,
   X,
+  Download,
+  Send,
+  Loader2,
 } from "lucide-react";
 import { Route as AuthRoute } from "./route";
 import { AppShell } from "@/components/layout/AppShell";
@@ -45,7 +48,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getMyProfile } from "@/lib/shops.functions";
+import { getMyProfile, listMyShops } from "@/lib/shops.functions";
 import { listProducts } from "@/lib/inventory.functions";
 import {
   createSale,
@@ -389,14 +392,24 @@ function Register({ shopId }: { shopId: string }) {
                 {cart.map((c) => (
                   <div
                     key={c.product_id}
-                    className="rounded-md border p-2 flex items-center gap-2"
+                    className="rounded-md border p-2 flex flex-wrap items-center gap-2"
                   >
-                    <div className="flex-1 min-w-0">
+                    {/* Row 1 on mobile: product info + delete */}
+                    <div className="flex-1 min-w-0 basis-[calc(100%-40px)] sm:basis-0">
                       <div className="text-sm font-medium truncate">{c.name}</div>
                       <div className="text-xs text-muted-foreground">
                         {fmt(c.unit_price)} / {c.unit}
                       </div>
                     </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-muted-foreground sm:order-last"
+                      onClick={() => updateQty(c.product_id, 0)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                    {/* Row 2 on mobile: qty controls + line total */}
                     <div className="flex items-center gap-1">
                       <Button
                         size="icon"
@@ -422,17 +435,9 @@ function Register({ shopId }: { shopId: string }) {
                         <Plus className="h-3 w-3" />
                       </Button>
                     </div>
-                    <div className="w-20 text-right text-sm font-medium">
+                    <div className="ml-auto text-right text-sm font-medium">
                       {fmt(c.quantity * c.unit_price)}
                     </div>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 text-muted-foreground"
-                      onClick={() => updateQty(c.product_id, 0)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
                   </div>
                 ))}
               </div>
@@ -738,6 +743,20 @@ function CustomerPicker({
 }
 
 
+function loadHtml2Pdf(): Promise<any> {
+  return new Promise((resolve) => {
+    if ((window as any).html2pdf) {
+      resolve((window as any).html2pdf);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+    script.onload = () => resolve((window as any).html2pdf);
+    script.onerror = () => resolve(null);
+    document.body.appendChild(script);
+  });
+}
+
 function ReceiptDialog({
   open,
   onClose,
@@ -748,6 +767,40 @@ function ReceiptDialog({
   sale: any | null;
 }) {
   const printRef = useRef<HTMLDivElement>(null);
+  const getProfile = useServerFn(getMyProfile);
+  const listShops = useServerFn(listMyShops);
+
+  const profileQ = useQuery({
+    queryKey: ["my-profile"],
+    queryFn: () => getProfile(),
+    enabled: open,
+  });
+
+  const shopsQ = useQuery({
+    queryKey: ["my-shops"],
+    queryFn: () => listShops(),
+    enabled: open,
+  });
+
+  const activeShopName = useMemo(() => {
+    const activeShopId = profileQ.data?.active_shop_id;
+    const shop = shopsQ.data?.find((s) => s.id === activeShopId);
+    return shop?.name || "My Shop";
+  }, [profileQ.data?.active_shop_id, shopsQ.data]);
+
+  const [downloading, setDownloading] = useState(false);
+  const [whatsappPhone, setWhatsappPhone] = useState("");
+
+  // Sync whatsapp phone state when sale changes
+  useEffect(() => {
+    if (sale?.customer_phone) {
+      const clean = sale.customer_phone.replace(/\D/g, "");
+      setWhatsappPhone(clean);
+    } else {
+      setWhatsappPhone("");
+    }
+  }, [sale]);
+
   if (!sale) return null;
 
   const handlePrint = () => {
@@ -767,6 +820,81 @@ function ReceiptDialog({
     w.print();
   };
 
+  const handleDownloadPDF = async () => {
+    setDownloading(true);
+    const html2pdf = await loadHtml2Pdf();
+    if (!html2pdf) {
+      toast.error("Failed to load PDF library. Please check your internet connection.");
+      setDownloading(false);
+      return;
+    }
+
+    const element = printRef.current;
+    if (!element) {
+      setDownloading(false);
+      return;
+    }
+
+    const opt = {
+      margin:       [10, 10, 10, 10],
+      filename:     `Invoice_${sale.invoice_number}.pdf`,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+
+    try {
+      await html2pdf().from(element).set(opt).save();
+      toast.success("PDF downloaded successfully");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to generate PDF");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleWhatsAppShare = () => {
+    let phoneNum = whatsappPhone.trim().replace(/\D/g, "");
+    if (!phoneNum) {
+      toast.error("Please enter a valid phone number");
+      return;
+    }
+    
+    if (phoneNum.length === 10) {
+      phoneNum = "91" + phoneNum;
+    }
+
+    const itemsText = (sale.items || []).map((it: any) => {
+      const name = it.name || it.product?.name || "Product";
+      const qty = it.quantity;
+      const price = Number(it.unit_price);
+      const total = qty * price;
+      return `• ${name}\n  ${qty} × ₹${price.toFixed(2)} = ₹${total.toFixed(2)}`;
+    }).join("\n");
+
+    const taxStr = Number(sale.tax_total) > 0 ? `\n*Tax*: ₹${Number(sale.tax_total).toFixed(2)}` : "";
+    const discountStr = Number(sale.discount) > 0 ? `\n*Discount*: -₹${Number(sale.discount).toFixed(2)}` : "";
+
+    const messageText = 
+`*${activeShopName}* 🛍️
+*Invoice*: ${sale.invoice_number}
+*Date*: ${new Date(sale.invoice_date).toLocaleDateString("en-IN")}
+
+--------------------------------
+${itemsText}
+--------------------------------
+*Subtotal*: ₹${Number(sale.subtotal).toFixed(2)}${taxStr}${discountStr}
+*Total*: *₹${Number(sale.total).toFixed(2)}*
+*Paid (${sale.payment_method})*: ₹${Number(sale.amount_paid).toFixed(2)}
+
+*Thank you for shopping with us!* 🙏`;
+
+    const url = `https://api.whatsapp.com/send?phone=${phoneNum}&text=${encodeURIComponent(messageText)}`;
+    window.open(url, "_blank");
+    toast.success("Opening WhatsApp chat...");
+  };
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md">
@@ -775,29 +903,45 @@ function ReceiptDialog({
         </DialogHeader>
         <div
           ref={printRef}
-          className="rounded-md border bg-white text-black p-4 font-mono text-xs"
+          className="rounded-md border bg-white text-black p-6 font-mono text-xs shadow-sm"
         >
-          <h1 style={{ textAlign: "center", fontWeight: 600 }}>
+          {/* Shop Header */}
+          <div className="text-center" style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: "16px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "1px" }}>
+              {activeShopName}
+            </div>
+            <div style={{ fontSize: "10px", color: "#666", marginTop: "2px" }}>
+              Retail Invoice
+            </div>
+          </div>
+
+          <h1 style={{ textAlign: "center", fontWeight: 600, fontSize: "12px", borderTop: "1px dashed #ccc", borderBottom: "1px dashed #ccc", padding: "4px 0", margin: "8px 0" }}>
             INVOICE {sale.invoice_number}
           </h1>
-          <div className="text-center">
-            {new Date(sale.invoice_date || Date.now()).toLocaleString()}
+          <div className="text-center" style={{ color: "#555", fontSize: "10px" }}>
+            {new Date(sale.invoice_date || Date.now()).toLocaleString("en-IN", {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit"
+            })}
           </div>
           {sale.customer_name && (
-            <div className="mt-2">Customer: {sale.customer_name}</div>
+            <div className="mt-2" style={{ fontWeight: 500 }}>Customer: {sale.customer_name}</div>
           )}
           <div className="sep" style={{ borderTop: "1px dashed #999", margin: "8px 0" }} />
-          <table>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
               {(sale.items || []).map((it: any, i: number) => (
                 <tr key={i}>
-                  <td>
-                    {it.name || it.product?.name}
-                    <div style={{ color: "#666" }}>
+                  <td style={{ padding: "4px 0" }}>
+                    <div style={{ fontWeight: 500 }}>{it.name || it.product?.name}</div>
+                    <div style={{ color: "#666", fontSize: "10px" }}>
                       {it.quantity} × {fmt(Number(it.unit_price))}
                     </div>
                   </td>
-                  <td className="right" style={{ textAlign: "right" }}>
+                  <td className="right" style={{ textAlign: "right", padding: "4px 0", fontWeight: 500 }}>
                     {fmt(it.quantity * Number(it.unit_price))}
                   </td>
                 </tr>
@@ -805,61 +949,86 @@ function ReceiptDialog({
             </tbody>
           </table>
           <div className="sep" style={{ borderTop: "1px dashed #999", margin: "8px 0" }} />
-          <table>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
               <tr>
-                <td>Subtotal</td>
-                <td className="right" style={{ textAlign: "right" }}>
+                <td style={{ padding: "2px 0" }}>Subtotal</td>
+                <td className="right" style={{ textAlign: "right", padding: "2px 0" }}>
                   {fmt(Number(sale.subtotal))}
                 </td>
               </tr>
               <tr>
-                <td>Tax</td>
-                <td className="right" style={{ textAlign: "right" }}>
+                <td style={{ padding: "2px 0" }}>Tax</td>
+                <td className="right" style={{ textAlign: "right", padding: "2px 0" }}>
                   {fmt(Number(sale.tax_total))}
                 </td>
               </tr>
               {Number(sale.discount) > 0 && (
                 <tr>
-                  <td>Discount</td>
-                  <td className="right" style={{ textAlign: "right" }}>
+                  <td style={{ padding: "2px 0" }}>Discount</td>
+                  <td className="right" style={{ textAlign: "right", padding: "2px 0" }}>
                     -{fmt(Number(sale.discount))}
                   </td>
                 </tr>
               )}
-              <tr style={{ fontWeight: 700 }}>
-                <td>Total</td>
-                <td className="right" style={{ textAlign: "right" }}>
+              <tr style={{ fontWeight: 700, fontSize: "13px" }}>
+                <td style={{ padding: "4px 0" }}>Total</td>
+                <td className="right" style={{ textAlign: "right", padding: "4px 0" }}>
                   {fmt(Number(sale.total))}
                 </td>
               </tr>
               <tr>
-                <td>Paid ({sale.payment_method})</td>
-                <td className="right" style={{ textAlign: "right" }}>
+                <td style={{ padding: "2px 0" }}>Paid ({sale.payment_method})</td>
+                <td className="right" style={{ textAlign: "right", padding: "2px 0" }}>
                   {fmt(Number(sale.amount_paid))}
                 </td>
               </tr>
               {Number(sale.change_due) > 0 && (
                 <tr>
-                  <td>Change</td>
-                  <td className="right" style={{ textAlign: "right" }}>
+                  <td style={{ padding: "2px 0" }}>Change</td>
+                  <td className="right" style={{ textAlign: "right", padding: "2px 0" }}>
                     {fmt(Number(sale.change_due))}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
-          <div className="text-center" style={{ marginTop: 10 }}>
+          <div className="text-center" style={{ marginTop: 14, fontStyle: "italic", borderTop: "1px dashed #ccc", paddingTop: "8px" }}>
             Thank you!
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            New sale
-          </Button>
-          <Button onClick={handlePrint}>
-            <Printer className="h-4 w-4 mr-2" /> Print
-          </Button>
+        <DialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-end sm:gap-2">
+          {/* WhatsApp share widget */}
+          <div className="flex items-center gap-1.5 w-full sm:w-auto mr-auto">
+            <span className="text-xs text-muted-foreground font-medium">WhatsApp:</span>
+            <Input
+              type="text"
+              placeholder="Phone number"
+              value={whatsappPhone}
+              onChange={(e) => setWhatsappPhone(e.target.value)}
+              className="h-8 text-xs w-28"
+            />
+            <Button size="sm" variant="outline" className="h-8 gap-1 text-xs border-emerald-500/30 hover:bg-emerald-50/50 hover:text-emerald-600 dark:hover:bg-emerald-950/20" onClick={handleWhatsAppShare}>
+              <Send className="h-3 w-3 text-emerald-500 fill-emerald-500/20" /> Share
+            </Button>
+          </div>
+
+          <div className="flex gap-2 w-full sm:w-auto justify-end">
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>
+              New sale
+            </Button>
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handlePrint}>
+              <Printer className="h-3.5 w-3.5 mr-1" /> Print
+            </Button>
+            <Button size="sm" className="h-8 text-xs gap-1" disabled={downloading} onClick={handleDownloadPDF}>
+              {downloading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              Download PDF
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
