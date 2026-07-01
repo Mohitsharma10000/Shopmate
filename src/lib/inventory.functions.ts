@@ -50,6 +50,9 @@ export const createCategory = createServerFn({ method: "POST" })
   .middleware([requireAppwriteAuth])
   .inputValidator((d: unknown) => categorySchema.parse(d))
   .handler(async ({ data, context }) => {
+    // Verify caller membership
+    await ensureMember(context.databases, context.userId, data.shop_id);
+
     const baseSlug = slugify(data.name) || "category";
     let slug = baseSlug;
     let i = 1;
@@ -88,6 +91,14 @@ export const deleteCategory = createServerFn({ method: "POST" })
   .middleware([requireAppwriteAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string() }).parse(d))
   .handler(async ({ data, context }) => {
+    // Retrieve category first to determine shop ownership
+    const cat = await context.databases.getDocument(
+      APPWRITE_DATABASE_ID,
+      "categories",
+      data.id
+    );
+    await ensureMember(context.databases, context.userId, cat.shop_id);
+
     await context.databases.deleteDocument(
       APPWRITE_DATABASE_ID,
       "categories",
@@ -175,6 +186,10 @@ export const getProduct = createServerFn({ method: "GET" })
       "products",
       data.id
     );
+    
+    // Verify caller membership on target shop
+    await ensureMember(context.databases, context.userId, doc.shop_id);
+
     return mapDocument(doc);
   });
 
@@ -182,6 +197,9 @@ export const createProduct = createServerFn({ method: "POST" })
   .middleware([requireAppwriteAuth])
   .inputValidator((d: unknown) => productSchema.parse(d))
   .handler(async ({ data, context }) => {
+    // Verify caller membership
+    await ensureMember(context.databases, context.userId, data.shop_id);
+
     const { opening_stock, ...fields } = data;
     const productId = ID.unique();
     const payload = {
@@ -228,6 +246,15 @@ export const updateProduct = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { id, opening_stock: _ignore, shop_id: _s, ...rest } = data;
+    
+    // Retrieve product to verify shop membership
+    const doc = await context.databases.getDocument(
+      APPWRITE_DATABASE_ID,
+      "products",
+      id
+    );
+    await ensureMember(context.databases, context.userId, doc.shop_id);
+
     const update = { ...rest } as Record<string, unknown>;
     if ("sku" in update) update.sku = update.sku || null;
     if ("barcode" in update) update.barcode = update.barcode || null;
@@ -248,6 +275,14 @@ export const deleteProduct = createServerFn({ method: "POST" })
   .middleware([requireAppwriteAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string() }).parse(d))
   .handler(async ({ data, context }) => {
+    // Retrieve product to verify shop membership
+    const doc = await context.databases.getDocument(
+      APPWRITE_DATABASE_ID,
+      "products",
+      data.id
+    );
+    await ensureMember(context.databases, context.userId, doc.shop_id);
+
     await context.databases.deleteDocument(
       APPWRITE_DATABASE_ID,
       "products",
@@ -272,6 +307,9 @@ export const adjustStock = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     if (data.quantity === 0) throw new Error("Quantity cannot be zero");
     
+    // Verify caller membership on target shop
+    await ensureMember(context.databases, context.userId, data.shop_id);
+    
     // We use the helper applyStockMovement which updates both stock_movements and products.stock_qty
     await applyStockMovement(context.databases, {
       shop_id: data.shop_id,
@@ -292,6 +330,14 @@ export const listStockMovements = createServerFn({ method: "GET" })
     z.object({ product_id: z.string(), limit: z.number().int().positive().max(100).default(30) }).parse(d),
   )
   .handler(async ({ data, context }) => {
+    // Retrieve product to determine shop ownership
+    const product = await context.databases.getDocument(
+      APPWRITE_DATABASE_ID,
+      "products",
+      data.product_id
+    );
+    await ensureMember(context.databases, context.userId, product.shop_id);
+
     const response = await context.databases.listDocuments(
       APPWRITE_DATABASE_ID,
       "stock_movements",

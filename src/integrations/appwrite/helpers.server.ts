@@ -233,3 +233,23 @@ export async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T>
   
   return next;
 }
+
+export function sanitizeError(err: any): Error {
+  console.error("[Backend Error Logs]:", err);
+  const msg = err instanceof Error ? err.message : String(err);
+  
+  // Keep user-friendly authorization/validation messages
+  if (
+    msg.includes("Unauthorized") || 
+    msg.includes("Access Denied") || 
+    msg.includes("Not a member") ||
+    msg.includes("Only the") ||
+    msg.includes("Only shop") ||
+    msg.includes("Target user") ||
+    msg.includes("Incorrect password")
+  ) {
+    return new Error(msg);
+  }
+  
+  return new Error("An internal server error occurred. Please try again later.");
+}

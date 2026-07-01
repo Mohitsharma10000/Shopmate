@@ -10,6 +10,7 @@ import {
   withLock,
   applyStockMovement,
   applyCustomerLedger,
+  sanitizeError,
 } from "@/integrations/appwrite/helpers.server";
 
 const itemSchema = z.object({
@@ -204,7 +205,7 @@ export const createSale = createServerFn({ method: "POST" })
         "sales",
         saleId
       );
-      throw new Error("Failed to record sale items: " + err.message);
+      throw sanitizeError(err);
     }
 
     return mapDocument(saleDoc);
@@ -241,6 +242,11 @@ export const getSale = createServerFn({ method: "GET" })
       "sales",
       data.id
     );
+
+    // Cross-tenant verification
+    if (header.shop_id !== data.shop_id) {
+      throw new Error("Access Denied: Record does not belong to this shop.");
+    }
 
     const itemsResponse = await context.databases.listDocuments(
       APPWRITE_DATABASE_ID,

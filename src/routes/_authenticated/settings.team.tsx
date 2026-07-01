@@ -17,9 +17,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getMyProfile, listMyShops } from "@/lib/shops.functions";
-import { listTeam, inviteMember, updateMemberRole, removeMember } from "@/lib/team.functions";
-import { Loader2, UserPlus, Trash2 } from "lucide-react";
+import { listTeam, inviteMember, updateMemberRole, removeMember, toggleMemberSubscription } from "@/lib/team.functions";
+import { Loader2, UserPlus, Trash2, CreditCard, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
+import { Route as AuthRoute } from "./route";
 
 export const Route = createFileRoute("/_authenticated/settings/team")({
   component: TeamSettings,
@@ -28,6 +29,7 @@ export const Route = createFileRoute("/_authenticated/settings/team")({
 type Role = "owner" | "manager" | "cashier" | "staff";
 
 function TeamSettings() {
+  const { user } = AuthRoute.useRouteContext();
   const qc = useQueryClient();
   const profileFn = useServerFn(getMyProfile);
   const listShopsFn = useServerFn(listMyShops);
@@ -35,6 +37,7 @@ function TeamSettings() {
   const inviteFn = useServerFn(inviteMember);
   const updateRoleFn = useServerFn(updateMemberRole);
   const removeFn = useServerFn(removeMember);
+  const toggleSubFn = useServerFn(toggleMemberSubscription);
 
   const profile = useQuery({ queryKey: ["my-profile"], queryFn: () => profileFn() });
   const shops = useQuery({ queryKey: ["my-shops"], queryFn: () => listShopsFn() });
@@ -80,6 +83,16 @@ function TeamSettings() {
       qc.invalidateQueries({ queryKey: ["team", activeId] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to remove"),
+  });
+
+  const toggleSub = useMutation({
+    mutationFn: ({ target_user_id, status }: { target_user_id: string; status: "active" | "inactive" }) =>
+      toggleSubFn({ data: { shop_id: activeId!, target_user_id, status } }),
+    onSuccess: () => {
+      toast.success("Teammate subscription status updated");
+      qc.invalidateQueries({ queryKey: ["team", activeId] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to update subscription"),
   });
 
   if (!activeId) {
@@ -175,6 +188,39 @@ function TeamSettings() {
                         Invited
                       </Badge>
                     )}
+                    {m.user_id && (
+                      <div className="flex items-center gap-1.5">
+                        <Badge
+                          variant={m.profile?.subscription_status === "active" ? "default" : "secondary"}
+                          className={`text-[10px] sm:text-xs font-medium px-2 py-0.5 rounded-full ${
+                            m.profile?.subscription_status === "active"
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+                              : "bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"
+                          }`}
+                        >
+                          {m.profile?.subscription_status === "active" ? "Paid" : "Unpaid"}
+                        </Badge>
+                        {myRole === "owner" && m.user_id !== user?.$id && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 gap-1"
+                            disabled={toggleSub.isPending}
+                            onClick={() =>
+                              toggleSub.mutate({
+                                target_user_id: m.user_id,
+                                status: m.profile?.subscription_status === "active" ? "inactive" : "active",
+                              })
+                            }
+                          >
+                            <CreditCard className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">
+                              {m.profile?.subscription_status === "active" ? "Deactivate" : "Activate"}
+                            </span>
+                          </Button>
+                        )}
+                      </div>
+                    )}
                     {canManage && m.role !== "owner" ? (
                       <Select
                         value={m.role}
@@ -182,7 +228,7 @@ function TeamSettings() {
                           changeRole.mutate({ id: m.id, role: v as Role })
                         }
                       >
-                        <SelectTrigger className="w-32 h-8 text-xs">
+                        <SelectTrigger className="w-24 sm:w-32 h-8 text-xs">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>

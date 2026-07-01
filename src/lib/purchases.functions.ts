@@ -8,6 +8,7 @@ import {
   mapDocuments,
   ensureMember,
   applyStockMovement,
+  sanitizeError,
 } from "@/integrations/appwrite/helpers.server";
 
 function ensureManager(role: string) {
@@ -184,6 +185,11 @@ export const getPurchase = createServerFn({ method: "GET" })
       data.id,
     );
 
+    // Cross-tenant verification
+    if (header.shop_id !== data.shop_id) {
+      throw new Error("Access Denied: Record does not belong to this shop.");
+    }
+
     // Attach supplier
     let supplier = null;
     if (header.supplier_id) {
@@ -299,7 +305,7 @@ export const createPurchase = createServerFn({ method: "POST" })
       }
     } catch (err: any) {
       await context.databases.deleteDocument(APPWRITE_DATABASE_ID, "purchases", purchaseId);
-      throw new Error("Failed to record purchase items: " + err.message);
+      throw sanitizeError(err);
     }
 
     return mapDocument(purchaseDoc);

@@ -5,9 +5,13 @@ export const Route = createFileRoute("/")({
   ssr: false,
   beforeLoad: async () => {
     try {
-      await account.get();
+      const user = await account.get();
+      if (user.email.toLowerCase() === "mohitsharma14651@gmail.com") {
+        throw redirect({ to: "/admin" });
+      }
       throw redirect({ to: "/dashboard" });
-    } catch {
+    } catch (err: any) {
+      if (err?.to || err?.redirect) throw err;
       throw redirect({ to: "/auth" });
     }
   },

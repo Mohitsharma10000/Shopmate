@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAppwriteAuth } from "@/integrations/appwrite/auth-middleware";
 import { APPWRITE_DATABASE_ID } from "@/integrations/appwrite/client.server";
 import { Query, ID } from "node-appwrite";
-import { mapDocument, mapDocuments } from "@/integrations/appwrite/helpers.server";
+import { mapDocument, mapDocuments, ensureMember } from "@/integrations/appwrite/helpers.server";
 
 const createShopSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -186,6 +186,13 @@ export const updateShop = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { id, ...rest } = data;
+    
+    // Enforce authorization check: Must be owner or manager
+    const role = await ensureMember(context.databases, context.userId, id);
+    if (role !== "owner" && role !== "manager") {
+      throw new Error("Unauthorized: Only owners and managers can update shop configuration");
+    }
+
     await context.databases.updateDocument(
       APPWRITE_DATABASE_ID,
       "shops",

@@ -1,4 +1,4 @@
-import { Client, Account, Databases, Storage } from 'node-appwrite';
+import { Client, Account, Databases, Storage, Users } from 'node-appwrite';
 
 const endpoint = process.env.VITE_APPWRITE_ENDPOINT;
 const projectId = process.env.VITE_APPWRITE_PROJECT_ID;
@@ -30,6 +30,9 @@ export function createAdminClient() {
     },
     get storage() {
       return new Storage(client);
+    },
+    get users() {
+      return new Users(client);
     },
   };
 }

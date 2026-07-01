@@ -20,19 +20,44 @@ export const Route = createFileRoute("/auth")({
   }),
   beforeLoad: async () => {
     try {
-      await account.get();
-      throw redirect({ to: "/dashboard" });
-    } catch {}
+      const user = await account.get();
+      if (user.email.toLowerCase() === "mohitsharma14651@gmail.com") {
+        throw redirect({ to: "/admin" });
+      }
+      // Check subscription status — redirect to subscribe or dashboard
+      try {
+        const profile = await databases.getDocument(
+          APPWRITE_DATABASE_ID,
+          "profiles",
+          user.$id
+        );
+        if (profile.subscription_status === "active") {
+          throw redirect({ to: "/dashboard" });
+        } else {
+          throw redirect({ to: "/subscribe" });
+        }
+      } catch (err: any) {
+        if (err?.to || err?.redirect) throw err;
+        // Profile not found or error — send to subscribe
+        throw redirect({ to: "/subscribe" });
+      }
+    } catch (err: any) {
+      if (err?.to || err?.redirect) throw err;
+      // No session — stay on auth page
+    }
   },
   component: AuthPage,
 });
 
 function AuthPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotBusy, setForgotBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
 
@@ -42,8 +67,9 @@ function AuthPage() {
       try {
         const currentUser = await account.get();
         if (currentUser) {
-          toast.success("You are already signed in. Redirecting to dashboard...");
-          navigate({ to: "/dashboard" });
+          toast.success("You are already signed in. Redirecting...");
+          const isOwnerUser = currentUser.email?.toLowerCase() === "mohitsharma14651@gmail.com";
+          navigate({ to: isOwnerUser ? "/admin" : "/subscribe" });
         }
       } catch {
         // No active session, stay on auth page
@@ -52,9 +78,34 @@ function AuthPage() {
     checkSession();
   }, [navigate]);
 
+  async function handleForgot(e: FormEvent) {
+    e.preventDefault();
+    if (!forgotEmail.trim()) {
+      toast.error("Please enter your email address.");
+      return;
+    }
+    setForgotBusy(true);
+    try {
+      await account.createRecovery(
+        forgotEmail.trim(),
+        window.location.origin + "/reset-password"
+      );
+      toast.success("Password reset link sent to your email! Check your inbox.");
+      setMode("signin");
+      setForgotEmail("");
+    } catch (err: any) {
+      toast.error(err instanceof Error ? err.message : "Failed to send reset link");
+    } finally {
+      setForgotBusy(false);
+    }
+  }
+
   async function handleEmail(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
+
+
+
     try {
       // 1. Check if a session already exists
       let existingUser = null;
@@ -68,7 +119,7 @@ function AuthPage() {
         if (existingUser.email.toLowerCase() === email.trim().toLowerCase()) {
           toast.success("You are already signed in.");
           authEvents.notify();
-          navigate({ to: "/dashboard" });
+          navigate({ to: "/subscribe" });
           return;
         } else {
           // Different user: delete current session first
@@ -114,7 +165,7 @@ function AuthPage() {
             {
               full_name: displayName,
               avatar_url: null,
-              phone: null,
+              phone: phone.trim() || null,
               active_shop_id: null,
             }
           );
@@ -138,12 +189,14 @@ function AuthPage() {
         }
       }
       authEvents.notify();
-      navigate({ to: "/dashboard" });
+      const isOwnerUser = email.trim().toLowerCase() === "mohitsharma14651@gmail.com";
+      navigate({ to: isOwnerUser ? "/admin" : "/subscribe" });
     } catch (err: any) {
       if (err?.message?.includes("session is active") || err?.type === "user_session_already_exists") {
-        toast.info("Active session detected. Redirecting to dashboard...");
+        toast.info("Active session detected. Redirecting...");
         authEvents.notify();
-        navigate({ to: "/dashboard" });
+        const isOwnerUser = email.trim().toLowerCase() === "mohitsharma14651@gmail.com";
+        navigate({ to: isOwnerUser ? "/admin" : "/subscribe" });
       } else {
         toast.error(err instanceof Error ? err.message : "Something went wrong");
       }
@@ -163,13 +216,13 @@ function AuthPage() {
       }
       await account.createOAuth2Session(
         OAuthProvider.Google,
-        window.location.origin + "/dashboard", // redirect on success
+        window.location.origin + "/subscribe", // redirect on success
         window.location.origin + "/auth" // redirect on failure
       );
     } catch (err: any) {
       if (err?.message?.includes("session is active") || err?.type === "user_session_already_exists") {
-        toast.info("Already logged in. Redirecting to dashboard...");
-        navigate({ to: "/dashboard" });
+        toast.info("Already logged in. Redirecting...");
+        navigate({ to: "/subscribe" });
       } else {
         toast.error(err instanceof Error ? err.message : "Google sign-in failed");
         setGoogleBusy(false);
@@ -221,82 +274,141 @@ function AuthPage() {
 
           <Card className="mt-6 border-border/60 shadow-soft">
             <CardContent className="p-6">
-              <Tabs value={mode} onValueChange={(v) => setMode(v as "signin" | "signup")}>
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="signin">Sign in</TabsTrigger>
-                  <TabsTrigger value="signup">Sign up</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value={mode} className="mt-6">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
-                    onClick={handleGoogle}
-                    disabled={googleBusy}
-                  >
-                    {googleBusy ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <GoogleIcon />
-                    )}
-                    Continue with Google
-                  </Button>
-
-                  <div className="relative my-5">
-                    <div className="absolute inset-0 flex items-center">
-                      <span className="w-full border-t border-border" />
-                    </div>
-                    <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-card px-2 text-muted-foreground">or</span>
-                    </div>
-                  </div>
-
-                  <form onSubmit={handleEmail} className="space-y-3">
-                    {mode === "signup" && (
-                      <div className="space-y-1.5">
-                        <Label htmlFor="name">Your name</Label>
-                        <Input
-                          id="name"
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                          placeholder="Jane Doe"
-                          autoComplete="name"
-                        />
-                      </div>
-                    )}
+              {mode === "forgot" ? (
+                <div className="space-y-4">
+                  <h3 className="text-base font-semibold tracking-tight text-foreground">Reset password</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Enter your email address and we will send you a secure link to reset your password.
+                  </p>
+                  <form onSubmit={handleForgot} className="space-y-3">
                     <div className="space-y-1.5">
-                      <Label htmlFor="email">Email</Label>
+                      <Label htmlFor="forgot-email">Email Address</Label>
                       <Input
-                        id="email"
+                        id="forgot-email"
                         type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
                         required
-                        autoComplete="email"
                         placeholder="you@example.com"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="password">Password</Label>
-                      <Input
-                        id="password"
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                        minLength={6}
-                        autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                        placeholder="••••••••"
-                      />
-                    </div>
-                    <Button type="submit" className="w-full" disabled={busy}>
-                      {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-                      {mode === "signin" ? "Sign in" : "Create account"}
+                    <Button type="submit" className="w-full" disabled={forgotBusy}>
+                      {forgotBusy && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                      Send Reset Link
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="w-full text-xs"
+                      onClick={() => setMode("signin")}
+                    >
+                      Back to sign in
                     </Button>
                   </form>
-                </TabsContent>
-              </Tabs>
+                </div>
+              ) : (
+                <Tabs value={mode} onValueChange={(v) => setMode(v as "signin" | "signup")}>
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="signin">Sign in</TabsTrigger>
+                    <TabsTrigger value="signup">Sign up</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value={mode} className="mt-6">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={handleGoogle}
+                      disabled={googleBusy}
+                    >
+                      {googleBusy ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <GoogleIcon />
+                      )}
+                      Continue with Google
+                    </Button>
+
+                    <div className="relative my-5">
+                      <div className="absolute inset-0 flex items-center">
+                        <span className="w-full border-t border-border" />
+                      </div>
+                      <div className="relative flex justify-center text-xs uppercase">
+                        <span className="bg-card px-2 text-muted-foreground">or</span>
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleEmail} className="space-y-3">
+                      {mode === "signup" && (
+                        <>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="name">Your name</Label>
+                            <Input
+                              id="name"
+                              value={name}
+                              onChange={(e) => setName(e.target.value)}
+                              placeholder="Jane Doe"
+                              autoComplete="name"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="phone">Phone number *</Label>
+                            <Input
+                              id="phone"
+                              type="tel"
+                              required
+                              value={phone}
+                              onChange={(e) => setPhone(e.target.value)}
+                              placeholder="+91 98765 43210"
+                              autoComplete="tel"
+                            />
+                          </div>
+                        </>
+                      )}
+                      <div className="space-y-1.5">
+                        <Label htmlFor="email">Email</Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          required
+                          autoComplete="email"
+                          placeholder="you@example.com"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="password">Password</Label>
+                          {mode === "signin" && (
+                            <button
+                              type="button"
+                              onClick={() => setMode("forgot")}
+                              className="text-xs text-primary hover:underline"
+                            >
+                              Forgot password?
+                            </button>
+                          )}
+                        </div>
+                        <Input
+                          id="password"
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          required
+                          minLength={6}
+                          autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                          placeholder="••••••••"
+                        />
+                      </div>
+                      <Button type="submit" className="w-full" disabled={busy}>
+                        {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {mode === "signin" ? "Sign in" : "Create account"}
+                      </Button>
+                    </form>
+                  </TabsContent>
+                </Tabs>
+              )}
             </CardContent>
           </Card>
 

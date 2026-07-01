@@ -109,6 +109,12 @@ export const getCustomer = createServerFn({ method: "GET" })
       "customers",
       data.id,
     );
+
+    // Cross-tenant verification
+    if (cust.shop_id !== data.shop_id) {
+      throw new Error("Access Denied: Record does not belong to this shop.");
+    }
+
     const ledgerRes = await context.databases.listDocuments(
       APPWRITE_DATABASE_ID,
       "customer_ledger",
