@@ -75,10 +75,14 @@ function SubscribePage() {
   const [paying, setPaying] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  // Check if already subscribed
+  // Check if already subscribed, polling every 2 seconds to detect owner activation or payment status updates
   const subStatus = useQuery({
     queryKey: ["subscription-status"],
     queryFn: () => statusFn(),
+    refetchInterval: (query) => {
+      // Poll every 2 seconds if not active yet
+      return query.state.data?.status === "active" ? false : 2000;
+    },
   });
 
   useEffect(() => {
