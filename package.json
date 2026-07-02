@@ -1,5 +1,8 @@
 {
-  "name": "tanstack_start_ts",
+  "name": "shopos",
+  "version": "1.0.0",
+  "description": "ShopOS - Modern Shop Management & POS System",
+  "author": "ShopOS Team",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -9,7 +12,35 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "electron:install": "cd electron && npm install",
+    "electron:dev": "set NODE_ENV=development&& cd electron && npm start",
+    "electron:package": "electron-builder"
+  },
+  "build": {
+    "appId": "com.shopos.desktop",
+    "productName": "ShopOS",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/main.js",
+      "electron/preload.js",
+      "electron/package.json",
+      "!electron/node_modules"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "public/favicon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",
@@ -83,6 +114,8 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.32.0",
     "eslint-config-prettier": "^10.1.1",
     "eslint-plugin-prettier": "^5.2.6",

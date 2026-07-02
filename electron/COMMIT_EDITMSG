@@ -1,0 +1,1 @@
+fix(rollback): use dedicated rollback_failures Appwrite collection for durable structured logging instead of sales.notes (500 char truncation) or ephemeral local files

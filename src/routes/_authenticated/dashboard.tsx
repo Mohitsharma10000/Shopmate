@@ -1,13 +1,27 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Route as AuthRoute } from "./route";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { getMyProfile, listMyShops } from "@/lib/shops.functions";
-import { dashboardOverview } from "@/lib/reports.functions";
+import { dashboardOverview, todaysSoldProducts } from "@/lib/reports.functions";
 import { AiInsightsCard } from "@/components/AiInsightsCard";
 import {
   TrendingUp,
@@ -51,6 +65,8 @@ function Dashboard() {
   const profileFn = useServerFn(getMyProfile);
   const listFn = useServerFn(listMyShops);
   const overviewFn = useServerFn(dashboardOverview);
+
+  const [showTodaySold, setShowTodaySold] = useState(false);
 
   const shops = useQuery({ queryKey: ["my-shops"], queryFn: () => listFn() });
   const profile = useQuery({ queryKey: ["my-profile"], queryFn: () => profileFn() });
@@ -113,6 +129,7 @@ function Dashboard() {
             value={String(data?.today_orders ?? 0)}
             icon={ShoppingCart}
             hint={data ? `${data.week_orders} this week` : "—"}
+            onClick={() => setShowTodaySold(true)}
           />
           <KpiCard
             label="Inventory value"
@@ -253,6 +270,14 @@ function Dashboard() {
             <AiInsightsCard shopId={activeShop.id} />
           </div>
         )}
+
+        {activeShop && (
+          <TodaySoldDialog
+            open={showTodaySold}
+            onClose={() => setShowTodaySold(false)}
+            shopId={activeShop.id}
+          />
+        )}
       </div>
     </AppShell>
   );
@@ -264,15 +289,22 @@ function KpiCard({
   icon: Icon,
   hint,
   trendUp,
+  onClick,
 }: {
   label: string;
   value: string;
   icon: React.ComponentType<{ className?: string }>;
   hint?: string;
   trendUp?: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <Card className="border-border/60 shadow-soft">
+    <Card
+      className={`border-border/60 shadow-soft${
+        onClick ? " cursor-pointer hover:bg-accent/40 transition-colors" : ""
+      }`}
+      onClick={onClick}
+    >
       <CardContent className="p-5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -336,6 +368,70 @@ function QuickItem({
       <div className="text-sm font-medium">{title}</div>
       <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
     </button>
+  );
+}
+
+function TodaySoldDialog({
+  open,
+  onClose,
+  shopId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  shopId: string;
+}) {
+  const fetchSold = useServerFn(todaysSoldProducts);
+  const q = useQuery({
+    queryKey: ["todays-sold-products", shopId],
+    queryFn: () => fetchSold({ data: { shop_id: shopId } }),
+    enabled: open,
+  });
+
+  const totalQty = (q.data || []).reduce((a: number, b: any) => a + b.qty, 0);
+  const totalRevenue = (q.data || []).reduce((a: number, b: any) => a + b.revenue, 0);
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Today's Sold Products</DialogTitle>
+        </DialogHeader>
+        {q.isLoading ? (
+          <div className="text-center py-8 text-muted-foreground">Loading…</div>
+        ) : !q.data?.length ? (
+          <div className="text-center py-8 text-muted-foreground">
+            No products sold today yet.
+          </div>
+        ) : (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Product</TableHead>
+                  <TableHead className="text-center">Qty</TableHead>
+                  <TableHead className="text-right">Revenue</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {q.data.map((p: any) => (
+                  <TableRow key={p.id}>
+                    <TableCell className="font-medium">{p.name}</TableCell>
+                    <TableCell className="text-center">
+                      {p.qty} {p.unit}
+                    </TableCell>
+                    <TableCell className="text-right">{fmt(p.revenue)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <div className="flex justify-between items-center pt-3 border-t text-sm font-semibold">
+              <span>Total: {totalQty} items</span>
+              <span>{fmt(totalRevenue)}</span>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

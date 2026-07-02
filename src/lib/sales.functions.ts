@@ -257,7 +257,34 @@ export const getSale = createServerFn({ method: "GET" })
       ]
     );
     const items = mapDocuments(itemsResponse.documents);
-    return { ...mapDocument(header), items };
+
+    // Fetch product details to map names
+    const productIds = [...new Set(items.map((it: any) => it.product_id))].filter(Boolean) as string[];
+    const productMap = new Map<string, any>();
+    if (productIds.length > 0) {
+      for (let i = 0; i < productIds.length; i += 100) {
+        const batch = productIds.slice(i, i + 100);
+        const prodRes = await context.databases.listDocuments(
+          APPWRITE_DATABASE_ID,
+          "products",
+          [Query.equal("$id", batch), Query.limit(100)]
+        );
+        for (const p of prodRes.documents) {
+          productMap.set(p.$id, p);
+        }
+      }
+    }
+
+    const itemsWithProducts = items.map((it: any) => {
+      const prod = productMap.get(it.product_id);
+      return {
+        ...it,
+        name: prod?.name || "Unknown Product",
+        product: prod ? mapDocument(prod) : null,
+      };
+    });
+
+    return { ...mapDocument(header), items: itemsWithProducts };
   });
 
 export const salesSummary = createServerFn({ method: "GET" })

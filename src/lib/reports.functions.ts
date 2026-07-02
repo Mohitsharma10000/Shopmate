@@ -296,3 +296,63 @@ export const lowStockReport = createServerFn({ method: "GET" })
       (p: any) => Number(p.stock_qty) <= Number(p.reorder_level || 0),
     );
   });
+
+export const todaysSoldProducts = createServerFn({ method: "GET" })
+  .middleware([requireAppwriteAuth])
+  .inputValidator((d: unknown) => z.object({ shop_id: z.string() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await ensureMember(context.databases, context.userId, data.shop_id);
+    const today = startOfDay(new Date());
+
+    const salesRes = await context.databases.listDocuments(
+      APPWRITE_DATABASE_ID,
+      "sales",
+      [
+        Query.equal("shop_id", data.shop_id),
+        Query.equal("status", "completed"),
+        Query.greaterThanEqual("invoice_date", today.toISOString()),
+        Query.limit(1000),
+      ],
+    );
+    const saleIds = salesRes.documents.map((s: any) => s.$id);
+    const items = await fetchSaleItemsForSales(context.databases, saleIds);
+
+    const productIds = [...new Set(items.map((i: any) => i.product_id))] as string[];
+    const productMap = new Map<string, any>();
+    if (productIds.length > 0) {
+      for (let i = 0; i < productIds.length; i += 100) {
+        const batch = productIds.slice(i, i + 100);
+        const prodRes = await context.databases.listDocuments(
+          APPWRITE_DATABASE_ID,
+          "products",
+          [Query.equal("$id", batch), Query.limit(100)],
+        );
+        for (const p of prodRes.documents) {
+          productMap.set(p.$id, { id: p.$id, name: p.name, unit: p.unit });
+        }
+      }
+    }
+
+    const agg = new Map<
+      string,
+      { id: string; name: string; unit: string; qty: number; revenue: number }
+    >();
+    for (const r of items) {
+      const prod = productMap.get(r.product_id);
+      const name = prod?.name || "Unknown Product";
+      const unit = prod?.unit || "pcs";
+      const ex = agg.get(r.product_id) ?? {
+        id: r.product_id,
+        name,
+        unit,
+        qty: 0,
+        revenue: 0,
+      };
+      ex.qty += Number(r.quantity || 0);
+      ex.revenue += Number(r.line_total || 0);
+      agg.set(r.product_id, ex);
+    }
+
+    return Array.from(agg.values()).sort((a, b) => b.qty - a.qty);
+  });
+

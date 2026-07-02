@@ -1,0 +1,8 @@
+{
+  "name": "shopos-desktop",
+  "version": "1.0.0",
+  "description": "ShopOS Desktop - Point of Sale System",
+  "main": "main.js",
+  "author": "ShopOS Team",
+  "license": "MIT"
+}
