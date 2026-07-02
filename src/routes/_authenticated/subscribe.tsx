@@ -222,7 +222,7 @@ function SubscribePage() {
     }
   }, [user, verifyMut]);
 
-  if (subStatus.isLoading) {
+  if (subStatus.isLoading || subStatus.data?.status === "active") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

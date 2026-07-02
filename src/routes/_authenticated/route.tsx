@@ -5,11 +5,22 @@ import { useEffect } from "react";
 import { toast } from "sonner";
 import { account } from "@/integrations/appwrite/client";
 import { getSubscriptionStatus } from "@/lib/subscription.functions";
+import { Loader2 } from "lucide-react";
 
 const OWNER_EMAIL = "mohitsharma14651@gmail.com";
 
+function AuthPending() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  );
+}
+
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
+  pendingComponent: AuthPending,
+  pendingMinMs: 0,
   beforeLoad: async ({ location }) => {
     let user;
     try {

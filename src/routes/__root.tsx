@@ -117,8 +117,25 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="en">
       <head>
         <HeadContent />
+        <style dangerouslySetInnerHTML={{ __html: `
+          html, body { background: #fbfaf6; margin: 0; }
+          #app-splash {
+            position: fixed; inset: 0; z-index: 99999;
+            display: flex; align-items: center; justify-content: center;
+            background: #fbfaf6;
+            transition: opacity 0.3s ease;
+          }
+          #app-splash .spinner {
+            width: 36px; height: 36px;
+            border: 3px solid #e5e2db; border-top-color: #1B4332;
+            border-radius: 50%; animation: spin 0.7s linear infinite;
+          }
+          @keyframes spin { to { transform: rotate(360deg); } }
+          [data-hydrated] #app-splash { opacity: 0; pointer-events: none; }
+        `}} />
       </head>
       <body>
+        <div id="app-splash"><div className="spinner" style={{ width: 36, height: 36, border: '3px solid #e5e2db', borderTopColor: '#1B4332', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} /></div>
         {children}
         <Scripts />
       </body>
@@ -140,6 +157,17 @@ function AuthSync() {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  useEffect(() => {
+    // Mark body as hydrated to fade out the CSS splash
+    document.body.setAttribute("data-hydrated", "true");
+    // Remove splash div from DOM after fade transition
+    const splash = document.getElementById("app-splash");
+    if (splash) {
+      setTimeout(() => splash.remove(), 400);
+    }
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthSync />
