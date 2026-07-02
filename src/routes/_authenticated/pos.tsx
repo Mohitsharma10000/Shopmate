@@ -575,9 +575,9 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-type CustState = { id: string | null; name: string; phone: string; balance: number; credit_limit: number };
+export type CustState = { id: string | null; name: string; phone: string; balance: number; credit_limit: number };
 
-function CustomerPicker({
+export function CustomerPicker({
   shopId,
   value,
   onChange,

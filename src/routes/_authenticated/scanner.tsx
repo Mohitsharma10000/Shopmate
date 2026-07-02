@@ -16,7 +16,7 @@ import {
 import { Route as AuthRoute } from "./route";
 import { AppShell } from "@/components/layout/AppShell";
 import { InlineScanner } from "@/components/BarcodeScanner";
-import { ReceiptDialog } from "./pos";
+import { ReceiptDialog, CustomerPicker, type CustState } from "./pos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -121,10 +121,12 @@ function ScannerRegister({ shopId }: { shopId: string }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discount, setDiscount] = useState(0);
   const [paid, setPaid] = useState<string>("");
-  const [method, setMethod] = useState<"cash" | "card" | "upi">("cash");
+  const [method, setMethod] = useState<"cash" | "card" | "upi" | "credit">("cash");
   const [manualCode, setManualCode] = useState("");
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<any | null>(null);
+  const [customer, setCustomer] = useState<CustState>({ id: null, name: "", phone: "", balance: 0, credit_limit: 0 });
+  const [custOpen, setCustOpen] = useState(false);
 
   const sumQ = useQuery({
     queryKey: ["sales-summary", shopId],
@@ -156,6 +158,19 @@ function ScannerRegister({ shopId }: { shopId: string }) {
     const total = Math.max(0, sub + tax - (discount || 0));
     return { sub, tax, total };
   }, [cart, discount]);
+
+  const projectedBalance = customer.id
+    ? customer.balance +
+      Math.max(
+        0,
+        totals.total -
+          (Number(paid) || (method === "credit" ? 0 : totals.total)),
+      )
+    : 0;
+  const overLimit =
+    customer.id &&
+    customer.credit_limit > 0 &&
+    projectedBalance > customer.credit_limit;
 
   const addToCart = useCallback((p: Product) => {
     setCart((prev) => {
@@ -220,12 +235,12 @@ function ScannerRegister({ shopId }: { shopId: string }) {
       create({
         data: {
           shop_id: shopId,
-          customer_id: null,
-          customer_name: null,
-          customer_phone: null,
+          customer_id: customer.id || null,
+          customer_name: customer.name || null,
+          customer_phone: customer.phone || null,
           discount: discount || 0,
           round_off: 0,
-          amount_paid: Number(paid) || totals.total,
+          amount_paid: Number(paid) || (method === "credit" ? 0 : totals.total),
           payment_method: method,
           notes: "Scanned sale",
           items: cart.map((c) => ({
@@ -243,11 +258,14 @@ function ScannerRegister({ shopId }: { shopId: string }) {
       setCart([]);
       setDiscount(0);
       setPaid("");
+      setCustomer({ id: null, name: "", phone: "", balance: 0, credit_limit: 0 });
       setMethod("cash");
       setLastScanned(null);
       qc.invalidateQueries({ queryKey: ["pos-products"] });
       qc.invalidateQueries({ queryKey: ["sales-summary"] });
       qc.invalidateQueries({ queryKey: ["sales-list"] });
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      qc.invalidateQueries({ queryKey: ["khata-summary"] });
     },
     onError: (e: any) => toast.error(e?.message || "Could not save sale"),
   });
@@ -381,13 +399,24 @@ function ScannerRegister({ shopId }: { shopId: string }) {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <Label className="text-xs">Customer</Label>
+                <CustomerPicker
+                  shopId={shopId}
+                  value={customer}
+                  onChange={setCustomer}
+                  open={custOpen}
+                  setOpen={setCustOpen}
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <div className="grid gap-1">
                   <Label className="text-xs">Payment</Label>
                   <Select
                     value={method}
                     onValueChange={(v) =>
-                      setMethod(v as "cash" | "card" | "upi")
+                      setMethod(v as "cash" | "card" | "upi" | "credit")
                     }
                   >
                     <SelectTrigger className="h-8 text-xs">
@@ -397,6 +426,7 @@ function ScannerRegister({ shopId }: { shopId: string }) {
                       <SelectItem value="cash">Cash</SelectItem>
                       <SelectItem value="card">Card</SelectItem>
                       <SelectItem value="upi">UPI</SelectItem>
+                      <SelectItem value="credit">Credit (unpaid)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -411,6 +441,26 @@ function ScannerRegister({ shopId }: { shopId: string }) {
                   />
                 </div>
               </div>
+
+              <div className="grid gap-1">
+                <Label className="text-xs">Amount received</Label>
+                <div className="relative">
+                  <IndianRupee className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                  <Input
+                    type="number"
+                    className="h-8 pl-6 text-xs"
+                    value={paid}
+                    onChange={(e) => setPaid(e.target.value)}
+                    placeholder={String(totals.total.toFixed(2))}
+                  />
+                </div>
+              </div>
+
+              {overLimit && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/5 text-destructive text-[11px] p-2 leading-snug">
+                  Warning: this sale will exceed credit limit ({fmt(customer.credit_limit)}). New balance: {fmt(projectedBalance)}.
+                </div>
+              )}
 
               <Button
                 className="w-full h-11"
