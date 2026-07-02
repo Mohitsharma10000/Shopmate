@@ -169,33 +169,10 @@ function SubscribePage() {
       prefill: {
         email: user?.email || "",
         name: user?.name || "",
-      },
-      config: {
-        display: {
-          blocks: {
-            upi: {
-              name: "Pay using UPI",
-              instruments: [
-                { method: "upi", flows: ["collect", "intent", "qr"] },
-              ],
-            },
-            other: {
-              name: "Other Payment Methods",
-              instruments: [
-                { method: "card" },
-                { method: "netbanking" },
-                { method: "wallet" },
-              ],
-            },
-          },
-          sequence: ["block.upi", "block.other"],
-          preferences: {
-            show_default_blocks: false,
-          },
-        },
+        contact: user?.phone || "",
       },
       theme: {
-        color: "#6C3CE1",
+        color: "#1B4332",
       },
       handler: function (response: any) {
         if (response.razorpay_payment_id) {
