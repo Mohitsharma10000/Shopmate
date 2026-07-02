@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, redirect } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, redirect, Link } from "@tanstack/react-router";
 import { useState, useEffect, type FormEvent } from "react";
 import { account, authEvents, databases, APPWRITE_DATABASE_ID } from "@/integrations/appwrite/client";
 import { ID, OAuthProvider } from "appwrite";
@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Loader2, Store } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -69,6 +70,7 @@ function AuthPage() {
   const [forgotBusy, setForgotBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
 
   // Auto-redirect if session exists in browser on page load
   useEffect(() => {
@@ -111,6 +113,12 @@ function AuthPage() {
 
   async function handleEmail(e: FormEvent) {
     e.preventDefault();
+    
+    if (mode === "signup" && !acceptTerms) {
+      toast.error("Please accept the Terms of Use and Privacy Policy to continue.");
+      return;
+    }
+
     setBusy(true);
 
 
@@ -410,6 +418,31 @@ function AuthPage() {
                           placeholder="••••••••"
                         />
                       </div>
+                      
+                      {mode === "signup" && (
+                        <div className="flex items-start gap-2 pt-1 pb-2">
+                          <Checkbox
+                            id="accept-terms"
+                            checked={acceptTerms}
+                            onCheckedChange={(checked) => setAcceptTerms(!!checked)}
+                            required
+                          />
+                          <Label
+                            htmlFor="accept-terms"
+                            className="text-xs text-muted-foreground leading-normal font-normal cursor-pointer select-none"
+                          >
+                            I accept the{" "}
+                            <Link to="/terms-of-use" className="text-primary hover:underline font-medium">
+                              Terms of Use
+                            </Link>{" "}
+                            and{" "}
+                            <Link to="/privacy-policy" className="text-primary hover:underline font-medium">
+                              Privacy Policy
+                            </Link>
+                            .
+                          </Label>
+                        </div>
+                      )}
                       <Button type="submit" className="w-full" disabled={busy}>
                         {busy && <Loader2 className="h-4 w-4 animate-spin" />}
                         {mode === "signin" ? "Sign in" : "Create account"}
